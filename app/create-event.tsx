@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Text,
   TextInput,
@@ -12,7 +12,6 @@ import {
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import { useRouter } from 'expo-router'
-import * as Location from 'expo-location'
 import * as ImagePicker from 'expo-image-picker'
 import * as DocumentPicker from 'expo-document-picker'
 import {
@@ -23,11 +22,38 @@ import {
 } from '../lib/validation'
 import { SelectedEventImage, uploadEventImage } from '../lib/eventImages'
 
+type AddressSuggestion = {
+  display_name: string
+  lat: string
+  lon: string
+  address?: {
+    road?: string
+    house_number?: string
+    city?: string
+    town?: string
+    village?: string
+    hamlet?: string
+    suburb?: string
+    county?: string
+    state?: string
+    country?: string
+  }
+}
+
 export default function CreateEvent() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [date, setDate] = useState('')
   const [locationText, setLocationText] = useState('')
+  const [addressSuggestions, setAddressSuggestions] = useState<
+    AddressSuggestion[]
+  >([])
+  const [addressLoading, setAddressLoading] = useState(false)
+  const [addressError, setAddressError] = useState('')
+  const [selectedLatitude, setSelectedLatitude] = useState<number | null>(null)
+  const [selectedLongitude, setSelectedLongitude] = useState<number | null>(
+    null
+  )
   const [maxParticipants, setMaxParticipants] = useState('')
   const [ageLimit, setAgeLimit] = useState('')
   const [selectedImage, setSelectedImage] = useState<SelectedEventImage | null>(
@@ -36,6 +62,195 @@ export default function CreateEvent() {
   const [loading, setLoading] = useState(false)
 
   const router = useRouter()
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const lastSearchedRef = useRef('')
+  const selectedAddressRef = useRef('')
+
+  const normalizeAddressText = (text: string) =>
+    text
+      .replace(/\s+/g, ' ')
+      .replace(/[.,;:]+$/g, '')
+      .trim()
+
+  const buildNominatimUrl = (query: string, limit: number) => {
+    const url = new URL('https://nominatim.openstreetmap.org/search')
+    url.searchParams.set('format', 'jsonv2')
+    url.searchParams.set('addressdetails', '1')
+    url.searchParams.set('limit', String(limit))
+    url.searchParams.set('accept-language', 'ru')
+    url.searchParams.set('q', query)
+    return url.toString()
+  }
+
+  // ОБНОВЛЕННЫЙ ФОРМАТТИРОВЩИК АДРЕСА
+  const formatAddressFromSuggestion = (item: AddressSuggestion) => {
+    const address = item.address
+    if (!address) return item.display_name
+
+    const parts: string[] = []
+
+    // 1. Регион / Область / Город федерального значения (например, Санкт-Петербург / Ленинградская область)
+    if (address.state) {
+      parts.push(address.state)
+    }
+
+    // 2. Район (например, Всеволожский район)
+    if (address.county) {
+      parts.push(address.county)
+    }
+
+    // 3. Населенный пункт (Город / Поселок / Деревня)
+    if (address.city && address.city !== address.state) {
+      parts.push(address.city)
+    }
+    if (address.town) {
+      parts.push(address.town)
+    }
+    if (address.village) {
+      const name = address.village
+      parts.push(name.toLowerCase().includes('деревня') ? name : `деревня ${name}`)
+    }
+    if (address.hamlet) {
+      const name = address.hamlet
+      parts.push(name.toLowerCase().includes('д.') || name.toLowerCase().includes('деревня') ? name : `д. ${name}`)
+    }
+
+    // 4. Микрорайон / Район города
+    if (address.suburb) {
+      parts.push(address.suburb)
+    }
+
+    // 5. Улица и дом
+    if (address.road) {
+      if (address.house_number) {
+        parts.push(`${address.road}, д. ${address.house_number}`)
+      } else {
+        parts.push(address.road)
+      }
+    }
+
+    // Если цепочка пуста, возвращаем стандартную строку OSM
+    return parts.length > 0 ? parts.join(', ') : item.display_name
+  }
+
+  const fetchSuggestions = async (query: string, limit: number) => {
+    const controller = new AbortController()
+    abortRef.current?.abort()
+    abortRef.current = controller
+
+    const response = await fetch(buildNominatimUrl(query, limit), {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': 'ru',
+        'User-Agent': 'CreateEventApp/1.0',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    return (await response.json()) as AddressSuggestion[]
+  }
+
+  const searchAddress = async (text: string) => {
+    const normalized = normalizeAddressText(text)
+
+    selectedAddressRef.current = ''
+    setSelectedLatitude(null)
+    setSelectedLongitude(null)
+    setLocationText(text)
+    setAddressError('')
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+    }
+
+    if (normalized.length < 3) {
+      setAddressSuggestions([])
+      setAddressLoading(false)
+      lastSearchedRef.current = ''
+      return
+    }
+
+    const queryKey = normalized.toLowerCase()
+
+    debounceRef.current = setTimeout(async () => {
+      setAddressLoading(true)
+
+      try {
+        const results = await fetchSuggestions(normalized, 7)
+        lastSearchedRef.current = queryKey
+
+        const mapped = (Array.isArray(results) ? results : []).map((item) => ({
+          ...item,
+          display_name: formatAddressFromSuggestion(item),
+        }))
+
+        setAddressSuggestions(mapped)
+
+        if (mapped.length === 0) {
+          setAddressError('Адрес не найден')
+        } else {
+          setAddressError('')
+        }
+      } catch (error) {
+        console.log('Address search error:', error)
+        setAddressError('Не удалось загрузить подсказки')
+      } finally {
+        setAddressLoading(false)
+      }
+    }, 350)
+  }
+
+  const selectAddress = (item: AddressSuggestion) => {
+    const finalAddress = normalizeAddressText(item.display_name)
+
+    selectedAddressRef.current = finalAddress
+    lastSearchedRef.current = finalAddress.toLowerCase()
+
+    setLocationText(finalAddress)
+    setSelectedLatitude(Number(item.lat))
+    setSelectedLongitude(Number(item.lon))
+    setAddressSuggestions([])
+    setAddressError('')
+  }
+
+  const geocodeAddress = async (address: string) => {
+    const normalized = normalizeAddressText(address)
+
+    const trySearch = async () => {
+      const response = await fetch(buildNominatimUrl(normalized, 1), {
+        headers: {
+          Accept: 'application/json',
+          'Accept-Language': 'ru',
+          'User-Agent': 'CreateEventApp/1.0',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const data = (await response.json()) as AddressSuggestion[]
+      return data
+    }
+
+    const data = await trySearch()
+
+    if (!data || data.length === 0) {
+      throw new Error('Адрес не найден')
+    }
+
+    return {
+      latitude: Number(data[0].lat),
+      longitude: Number(data[0].lon),
+      displayName: formatAddressFromSuggestion(data[0]),
+    }
+  }
 
   const pickImageFromGallery = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
@@ -114,15 +329,17 @@ export default function CreateEvent() {
         return
       }
 
-      const { status } = await Location.requestForegroundPermissionsAsync()
+      let latitude = selectedLatitude
+      let longitude = selectedLongitude
+      let finalLocationText = normalizeAddressText(locationText)
 
-      let latitude = null
-      let longitude = null
-
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({})
-        latitude = loc.coords.latitude
-        longitude = loc.coords.longitude
+      if (latitude === null || longitude === null) {
+        const geocoded = await geocodeAddress(finalLocationText)
+        latitude = geocoded.latitude
+        longitude = geocoded.longitude
+        finalLocationText = normalizeAddressText(geocoded.displayName)
+        selectedAddressRef.current = finalLocationText
+        setLocationText(finalLocationText)
       }
 
       let imageUrl = null
@@ -144,7 +361,7 @@ export default function CreateEvent() {
           title: title.trim(),
           description: description.trim(),
           date: displayDateToIsoDate(date),
-          location: locationText.trim(),
+          location: finalLocationText,
           max_participants: maxParticipants ? Number(maxParticipants) : null,
           age_limit: ageLimit ? Number(ageLimit) : null,
           image_url: imageUrl,
@@ -168,8 +385,22 @@ export default function CreateEvent() {
     }
   }
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+
+      abortRef.current?.abort()
+    }
+  }, [])
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.title}>Создать мероприятие</Text>
 
       <TextInput
@@ -198,13 +429,45 @@ export default function CreateEvent() {
         keyboardType="numeric"
       />
 
-      <TextInput
-        placeholder="Адрес / место"
-        placeholderTextColor="#888"
-        style={styles.input}
-        value={locationText}
-        onChangeText={setLocationText}
-      />
+      <View style={styles.addressBlock}>
+        <TextInput
+          placeholder="Адрес / место"
+          placeholderTextColor="#888"
+          style={styles.input}
+          value={locationText}
+          onChangeText={searchAddress}
+          autoCorrect={false}
+          autoCapitalize="words"
+          returnKeyType="done"
+        />
+
+        {addressLoading ? (
+          <Text style={styles.addressStatus}>Поиск адресов...</Text>
+        ) : null}
+
+        {!addressLoading && addressError ? (
+          <Text style={styles.addressError}>{addressError}</Text>
+        ) : null}
+
+        {!addressLoading && addressSuggestions.length > 0 ? (
+          <View style={styles.suggestionsList}>
+            {addressSuggestions.map((item, index) => (
+              <TouchableOpacity
+                key={`${item.display_name}-${index}`}
+                style={[
+                  styles.suggestionItem,
+                  index === addressSuggestions.length - 1 &&
+                    styles.suggestionItemLast,
+                ]}
+                onPress={() => selectAddress(item)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.suggestionText}>{item.display_name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
+      </View>
 
       <TextInput
         placeholder="Макс участников"
@@ -293,6 +556,46 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 90,
     textAlignVertical: 'top',
+  },
+  addressBlock: {
+    marginBottom: 10,
+    position: 'relative',
+    zIndex: 9999,
+  },
+  addressStatus: {
+    color: '#9ca3af',
+    marginBottom: 6,
+    fontSize: 12,
+    paddingHorizontal: 2,
+  },
+  addressError: {
+    color: '#fca5a5',
+    marginBottom: 6,
+    fontSize: 12,
+    paddingHorizontal: 2,
+  },
+  suggestionsList: {
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    overflow: 'hidden',
+    marginBottom: 10,
+    zIndex: 9999,
+    elevation: 10,
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f2937',
+  },
+  suggestionItemLast: {
+    borderBottomWidth: 0,
+  },
+  suggestionText: {
+    color: '#fff',
+    fontSize: 14,
   },
   imageBox: {
     backgroundColor: '#111827',

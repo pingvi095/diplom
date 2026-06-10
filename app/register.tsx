@@ -9,6 +9,7 @@ import {
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import { useRouter } from 'expo-router'
+import SHA256 from 'crypto-js/sha256'
 import {
   isValidEmail,
   normalizeEmail,
@@ -17,6 +18,16 @@ import {
   sanitizeName,
   sanitizePhone,
 } from '../lib/validation'
+
+// Локализатор системных ошибок от Supabase Auth
+const translateError = (message: string): string => {
+  const msg = message.toLowerCase()
+  if (msg.includes('invalid login credentials')) return 'Неверный email или пароль'
+  if (msg.includes('user already exists')) return 'Пользователь с таким email уже зарегистрирован'
+  if (msg.includes('password should be at least')) return 'Пароль должен быть не менее 6 символов'
+  if (msg.includes('network request failed')) return 'Ошибка сети. Проверьте интернет-соединение'
+  return message
+}
 
 export default function Register() {
   const [name, setName] = useState('')
@@ -40,14 +51,23 @@ export default function Register() {
       return
     }
 
-    if (!password.trim()) {
-      Alert.alert('Ошибка', 'Введите пароль')
+    if (!password.trim() || password.length < 6) {
+      Alert.alert('Ошибка', 'Пароль должен быть не менее 6 символов')
       return
     }
 
+    // Проверка длины телефона (если поле заполнено)
+    if (phone.trim() && phone.trim().length < 11) {
+      Alert.alert('Ошибка', 'Номер телефона должен состоять из 11 цифр')
+      return
+    }
+
+    // Двойное хэширование: первый слой на клиенте
+    const clientHashedPassword = SHA256(password).toString()
+
     const { error } = await supabase.auth.signUp({
       email: normalizedEmail,
-      password,
+      password: clientHashedPassword,
       options: {
         data: {
           full_name: name.trim(),
@@ -58,11 +78,11 @@ export default function Register() {
     })
 
     if (error) {
-      Alert.alert('Ошибка', error.message)
+      Alert.alert('Ошибка', translateError(error.message))
       return
     }
 
-    Alert.alert('Успех', 'Аккаунт создан')
+    Alert.alert('Успех', 'Аккаунт успешно создан!')
     router.replace('/login')
   }
 
@@ -90,7 +110,7 @@ export default function Register() {
 
       <TextInput
         style={styles.input}
-        placeholder="Пароль"
+        placeholder="Пароль (минимум 6 символов)"
         placeholderTextColor="#888"
         secureTextEntry
         value={password}
@@ -99,11 +119,12 @@ export default function Register() {
 
       <TextInput
         style={styles.input}
-        placeholder="Телефон"
+        placeholder="Телефон (11 цифр без +)"
         placeholderTextColor="#888"
         value={phone}
         onChangeText={(text) => setPhone(sanitizePhone(text))}
         keyboardType="phone-pad"
+        maxLength={11} // Ограничение аппаратного ввода на уровне клавиатуры
       />
 
       <TextInput
@@ -113,6 +134,7 @@ export default function Register() {
         value={age}
         onChangeText={(text) => setAge(sanitizeDigits(text))}
         keyboardType="numeric"
+        maxLength={3}
       />
 
       <TouchableOpacity style={styles.button} onPress={handleRegister}>
@@ -141,6 +163,8 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   button: {
     backgroundColor: '#22c55e',

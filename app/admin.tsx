@@ -7,9 +7,13 @@ import {
   Alert,
   ScrollView,
   TextInput,
+  SafeAreaView,
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import { useRouter } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
+// Импортируем нашу функцию автоматических уведомлений
+import { sendLocalNotification } from '../lib/NotificationService'
 
 type ProfileRow = {
   id: string
@@ -32,6 +36,12 @@ export default function Admin() {
   const [events, setEvents] = useState<any[]>([])
   const [requests, setRequests] = useState<RoleRequest[]>([])
   const [search, setSearch] = useState('')
+  
+  // Стейты для управления сворачиванием секций (аккордеонов)
+  const [requestsExpanded, setRequestsExpanded] = useState(false)
+  const [usersExpanded, setUsersExpanded] = useState(false)
+  const [eventsExpanded, setEventsExpanded] = useState(false)
+
   const router = useRouter()
 
   useEffect(() => {
@@ -79,7 +89,22 @@ export default function Admin() {
       return
     }
 
-    setRequests((data || []) as RoleRequest[])
+    const fetchedRequests = (data || []) as RoleRequest[]
+    setRequests(fetchedRequests)
+
+    // АВТОМАТИЧЕСКАЯ ПРОВЕРКА ДЛЯ УВЕДОМЛЕНИЙ
+    // Считаем заявки со статусом 'pending'
+    const pendingCount = fetchedRequests.filter((r) => r.status === 'pending').length
+    
+    if (pendingCount > 0) {
+      // Сама магия автоматического уведомления при входе админа!
+      await sendLocalNotification(
+        "📢 Новая заявка на роль",
+        `Внимание! В системе обнаружено ${pendingCount} новых запросов на статус Организатора.`
+      )
+      // Для красоты автоматически приоткрываем вкладку с заявками на экране
+      setRequestsExpanded(true)
+    }
   }
 
   const changeRole = async (userId: string, newRole: string) => {
@@ -94,6 +119,7 @@ export default function Admin() {
     }
 
     loadUsers()
+    Alert.alert('Успех', 'Роль пользователя успешно изменена')
   }
 
   const handleRequest = async (request: RoleRequest, status: 'approved' | 'declined') => {
@@ -133,13 +159,14 @@ export default function Admin() {
     }
 
     loadEvents()
+    Alert.alert('Готово', 'Мероприятие удалено')
   }
 
   const deleteProfile = async (profile: ProfileRow) => {
     Alert.alert(
-  'Удаление профиля',
-  `Удалить профиль ${profile.full_name || profile.email || profile.id}?`,
-  [
+      'Удаление профиля',
+      `Удалить профиль ${profile.full_name || profile.email || profile.id}?`,
+      [
         { text: 'Отмена', style: 'cancel' },
         {
           text: 'Удалить',
@@ -147,66 +174,17 @@ export default function Admin() {
           onPress: async () => {
             try {
               if (profile.email) {
-                const { error: inv1 } = await supabase
+                await supabase
                   .from('invitations')
                   .delete()
                   .eq('recipient_email', profile.email)
-
-                if (inv1) {
-                  Alert.alert('Ошибка', inv1.message)
-                  return
-                }
               }
 
-              const { error: inv2 } = await supabase
-                .from('invitations')
-                .delete()
-                .eq('sender_id', profile.id)
-
-              if (inv2) {
-                Alert.alert('Ошибка', inv2.message)
-                return
-              }
-
-              const { error: favError } = await supabase
-                .from('favorites')
-                .delete()
-                .eq('user_id', profile.id)
-
-              if (favError) {
-                Alert.alert('Ошибка', favError.message)
-                return
-              }
-
-              const { error: ticketsError } = await supabase
-                .from('tickets')
-                .delete()
-                .eq('user_id', profile.id)
-
-              if (ticketsError) {
-                Alert.alert('Ошибка', ticketsError.message)
-                return
-              }
-
-              const { error: eventsError } = await supabase
-                .from('events')
-                .delete()
-                .eq('user_id', profile.id)
-
-              if (eventsError) {
-                Alert.alert('Ошибка', eventsError.message)
-                return
-              }
-
-              const { error: requestsError } = await supabase
-                .from('role_requests')
-                .delete()
-                .eq('user_id', profile.id)
-
-              if (requestsError) {
-                Alert.alert('Ошибка', requestsError.message)
-                return
-              }
+              await supabase.from('invitations').delete().eq('sender_id', profile.id)
+              await supabase.from('favorites').delete().eq('user_id', profile.id)
+              await supabase.from('tickets').delete().eq('user_id', profile.id)
+              await supabase.from('events').delete().eq('user_id', profile.id)
+              await supabase.from('role_requests').delete().eq('user_id', profile.id)
 
               const { error: profileError } = await supabase
                 .from('profiles')
@@ -231,6 +209,34 @@ export default function Admin() {
     )
   }
 
+  // Перевод ролей на русский язык для отображения
+  const translateRole = (role: string) => {
+    switch (role) {
+      case 'admin':
+        return 'Администратор'
+      case 'organizer':
+        return 'Организатор'
+      case 'participant':
+        return 'Участник'
+      default:
+        return role
+    }
+  }
+
+  // Перевод статусов на русский язык для отображения
+  const translateStatus = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return 'В ожидании ⏳'
+      case 'approved':
+        return 'Одобрено ✅'
+      case 'declined':
+        return 'Отклонено ❌'
+      default:
+        return status
+    }
+  }
+
   const filteredUsers = users.filter((user) => {
     const q = search.trim().toLowerCase()
     if (!q) return true
@@ -239,124 +245,189 @@ export default function Admin() {
       String(user.email || '').toLowerCase().includes(q) ||
       String(user.full_name || '').toLowerCase().includes(q) ||
       String(user.phone || '').toLowerCase().includes(q) ||
-      String(user.role || '').toLowerCase().includes(q)
+      translateRole(user.role).toLowerCase().includes(q)
     )
   })
 
+  // Подсчет количества активных заявок "в ожидании" для вывода на бейдж
+  const pendingRequestsCount = requests.filter((r) => r.status === 'pending').length
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      <Text style={styles.header}>Админ панель</Text>
+    <SafeAreaView style={styles.container}>
+      {/* ЗАКРЕПЛЕННЫЙ ВЕРХНИЙ ХЕДЕР */}
+      <View style={styles.fixedHeader}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={20} color="#fff" />
+          <Text style={styles.backButtonText}>Назад</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Админ панель</Text>
+      </View>
 
-      <TextInput
-        style={styles.search}
-        placeholder="Поиск пользователя"
-        placeholderTextColor="#888"
-        value={search}
-        onChangeText={setSearch}
-      />
-
-      <Text style={styles.section}>Заявки на организатора</Text>
-
-      {requests.length === 0 ? (
-        <Text style={styles.emptyText}>Пока нет заявок</Text>
-      ) : (
-        requests.map((req) => (
-          <View key={req.id} style={styles.card}>
-            <Text style={styles.text}>User ID: {req.user_id}</Text>
-            <Text style={styles.subText}>Статус: {req.status}</Text>
-
-            {req.status === 'pending' && (
-              <View style={styles.row}>
-                <TouchableOpacity
-                  style={styles.button}
-                  onPress={() => handleRequest(req, 'approved')}
-                >
-                  <Text style={styles.btnText}>Принять</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => handleRequest(req, 'declined')}
-                >
-                  <Text style={styles.btnText}>Отклонить</Text>
-                </TouchableOpacity>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        
+        {/* СЕКЦИЯ 1: ЗАЯВКИ НА РОЛЬ ОРГАНИЗАТОРА */}
+        <TouchableOpacity 
+          style={styles.accordionHeader} 
+          onPress={() => setRequestsExpanded(!requestsExpanded)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.accordionTitleRow}>
+            <Text style={styles.sectionTitle}>Заявки на организатора</Text>
+            {pendingRequestsCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{pendingRequestsCount}</Text>
               </View>
             )}
           </View>
-        ))
-      )}
+          <Ionicons 
+            name={requestsExpanded ? 'chevron-up' : 'chevron-down'} 
+            size={22} 
+            color="#22c55e" 
+          />
+        </TouchableOpacity>
 
-      <Text style={styles.section}>Пользователи</Text>
+        {requestsExpanded && (
+          <View style={styles.accordionBody}>
+            {requests.length === 0 ? (
+              <Text style={styles.emptyText}>Пока нет заявок</Text>
+            ) : (
+              requests.map((req) => (
+                <View key={req.id} style={styles.card}>
+                  <Text style={styles.text}>ID Пользователя: {req.user_id}</Text>
+                  <Text style={styles.subText}>Статус: {translateStatus(req.status)}</Text>
 
-      {filteredUsers.length === 0 ? (
-        <Text style={styles.emptyText}>Пользователи не найдены</Text>
-      ) : (
-        filteredUsers.map((user) => (
-          <View key={user.id} style={styles.card}>
-            <Text style={styles.text}>{user.full_name || 'Без имени'}</Text>
-            <Text style={styles.subText}>{user.email || 'Без email'}</Text>
-            <Text style={styles.subText}>Телефон: {user.phone || 'не указан'}</Text>
-            <Text style={styles.role}>Роль: {user.role}</Text>
-            <Text style={styles.subText}>Возраст: {user.age ?? 'не указан'}</Text>
+                  {req.status === 'pending' && (
+                    <View style={styles.row}>
+                      <TouchableOpacity
+                        style={styles.button}
+                        onPress={() => handleRequest(req, 'approved')}
+                      >
+                        <Text style={styles.btnText}>Принять</Text>
+                      </TouchableOpacity>
 
-            <View style={styles.row}>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => changeRole(user.id, 'participant')}
-              >
-                <Text style={styles.btnText}>User</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => changeRole(user.id, 'organizer')}
-              >
-                <Text style={styles.btnText}>Org</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => changeRole(user.id, 'admin')}
-              >
-                <Text style={styles.btnText}>Admin</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={styles.deleteButton}
-              onPress={() => deleteProfile(user)}
-            >
-              <Text style={styles.btnText}>Удалить профиль</Text>
-            </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleRequest(req, 'declined')}
+                      >
+                        <Text style={styles.btnText}>Отклонить</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
           </View>
-        ))
-      )}
+        )}
 
-      <Text style={styles.section}>События</Text>
+        {/* СЕКЦИЯ 2: ПОЛЬЗОВАТЕЛИ */}
+        <TouchableOpacity 
+          style={styles.accordionHeader} 
+          onPress={() => setUsersExpanded(!usersExpanded)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.sectionTitle}>Пользователи</Text>
+          <Ionicons 
+            name={usersExpanded ? 'chevron-up' : 'chevron-down'} 
+            size={22} 
+            color="#22c55e" 
+          />
+        </TouchableOpacity>
 
-      {events.length === 0 ? (
-        <Text style={styles.emptyText}>Событий нет</Text>
-      ) : (
-        events.map((event) => (
-          <View key={event.id} style={styles.card}>
-            <Text style={styles.text}>{event.title}</Text>
-            <Text style={styles.subText}>{event.date}</Text>
-            <Text style={styles.subText}>{event.location}</Text>
+        {usersExpanded && (
+          <View style={styles.accordionBody}>
+            <TextInput
+              style={styles.search}
+              placeholder="Поиск пользователя по имени, почте или роли..."
+              placeholderTextColor="#888"
+              value={search}
+              onChangeText={setSearch}
+            />
 
-            <TouchableOpacity
-              style={styles.deleteButton}
-              onPress={() => deleteEvent(event.id)}
-            >
-              <Text style={styles.btnText}>Удалить событие</Text>
-            </TouchableOpacity>
+            {filteredUsers.length === 0 ? (
+              <Text style={styles.emptyText}>Пользователи не найдены</Text>
+            ) : (
+              filteredUsers.map((user) => (
+                <View key={user.id} style={styles.card}>
+                  <Text style={styles.text}>{user.full_name || 'Без имени'}</Text>
+                  <Text style={styles.subText}>{user.email || 'Без email'}</Text>
+                  <Text style={styles.subText}>Телефон: {user.phone || 'не указан'}</Text>
+                  <Text style={styles.role}>Роль: <Text style={styles.roleHighlight}>{translateRole(user.role)}</Text></Text>
+                  <Text style={styles.subText}>Возраст: {user.age ?? 'не указан'}</Text>
+
+                  <View style={styles.roleChangeRow}>
+                    <TouchableOpacity
+                      style={styles.roleButton}
+                      onPress={() => changeRole(user.id, 'participant')}
+                    >
+                      <Text style={styles.roleBtnText}>Юзер</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.roleButton}
+                      onPress={() => changeRole(user.id, 'organizer')}
+                    >
+                      <Text style={styles.roleBtnText}>Орг</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.roleButton}
+                      onPress={() => changeRole(user.id, 'admin')}
+                    >
+                      <Text style={styles.roleBtnText}>Админ</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => deleteProfile(user)}
+                  >
+                    <Text style={styles.btnText}>Удалить профиль</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </View>
-        ))
-      )}
+        )}
 
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backButtonText}>Назад</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        {/* СЕКЦИЯ 3: СОБЫТИЯ */}
+        <TouchableOpacity 
+          style={styles.accordionHeader} 
+          onPress={() => setEventsExpanded(!eventsExpanded)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.sectionTitle}>События</Text>
+          <Ionicons 
+            name={eventsExpanded ? 'chevron-up' : 'chevron-down'} 
+            size={22} 
+            color="#22c55e" 
+          />
+        </TouchableOpacity>
+
+        {eventsExpanded && (
+          <View style={styles.accordionBody}>
+            {events.length === 0 ? (
+              <Text style={styles.emptyText}>Событий нет</Text>
+            ) : (
+              events.map((event) => (
+                <View key={event.id} style={styles.card}>
+                  <Text style={styles.text}>{event.title}</Text>
+                  <Text style={styles.subText}>Дата: {event.date}</Text>
+                  <Text style={styles.subText}>Место: {event.location || 'Не указано'}</Text>
+
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => deleteEvent(event.id)}
+                  >
+                    <Text style={styles.btnText}>Удалить событие</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+      </ScrollView>
+    </SafeAreaView>
   )
 }
 
@@ -364,12 +435,79 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#020617',
-    padding: 20,
   },
-  header: {
+  fixedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#334155',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  backButtonText: {
     color: '#fff',
-    fontSize: 28,
-    marginBottom: 20,
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 2,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 16,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  accordionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  accordionBody: {
+    backgroundColor: '#0f172a',
+    padding: 10,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    borderTopWidth: 0,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  badge: {
+    backgroundColor: '#ef4444',
+    borderRadius: 99,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '700',
   },
   search: {
@@ -377,70 +515,87 @@ const styles = StyleSheet.create({
     color: '#fff',
     padding: 12,
     borderRadius: 12,
-    marginBottom: 16,
-  },
-  section: {
-    color: '#22c55e',
-    fontSize: 20,
-    marginTop: 16,
-    marginBottom: 10,
-    fontWeight: '700',
+    marginBottom: 12,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
   emptyText: {
     color: '#9ca3af',
-    marginBottom: 10,
+    padding: 10,
+    textAlign: 'center',
   },
   card: {
     backgroundColor: '#111827',
     padding: 14,
     borderRadius: 12,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   text: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   subText: {
     color: '#cbd5e1',
     marginTop: 4,
+    fontSize: 13,
   },
   role: {
     color: '#9ca3af',
-    marginTop: 8,
-    marginBottom: 10,
+    marginTop: 6,
+    marginBottom: 8,
+    fontSize: 13,
+  },
+  roleHighlight: {
+    color: '#22c55e',
+    fontWeight: '700',
   },
   row: {
     flexDirection: 'row',
     gap: 8,
-    flexWrap: 'wrap',
+    marginTop: 10,
+  },
+  roleChangeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 10,
+    backgroundColor: '#0f172a',
+    padding: 6,
+    borderRadius: 8,
   },
   button: {
     backgroundColor: '#22c55e',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
+  },
+  roleButton: {
+    backgroundColor: '#334155',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    flex: 1,
+    alignItems: 'center',
   },
   deleteButton: {
     backgroundColor: '#ef4444',
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: 8,
     marginTop: 10,
+    alignItems: 'center',
   },
   btnText: {
     color: '#000',
     fontWeight: '700',
+    fontSize: 14,
   },
-  backButton: {
-    backgroundColor: '#334155',
-    padding: 14,
-    borderRadius: 12,
-    marginTop: 20,
-    alignSelf: 'flex-start',
-  },
-  backButtonText: {
+  roleBtnText: {
     color: '#fff',
-    fontWeight: '700',
+    fontWeight: '600',
+    fontSize: 13,
   },
 })

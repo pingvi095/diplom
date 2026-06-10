@@ -55,6 +55,19 @@ export default function Profile() {
     }
   }
 
+  const translateRole = (userRole: string) => {
+    switch (userRole) {
+      case 'admin':
+        return 'Администратор'
+      case 'organizer':
+        return 'Организатор'
+      case 'participant':
+        return 'Участник'
+      default:
+        return userRole
+    }
+  }
+
   const requestOrganizer = async () => {
     const {
       data: { user },
@@ -106,7 +119,7 @@ export default function Profile() {
     if (error) {
       Alert.alert('Ошибка', error.message)
     } else {
-      Alert.alert('Сохранено')
+      Alert.alert('Успех', 'Изменения сохранены')
       setEditVisible(false)
       loadProfile()
     }
@@ -135,7 +148,7 @@ export default function Profile() {
         <Text style={styles.value}>{age ?? 'Не указан'}</Text>
 
         <Text style={styles.label}>Роль</Text>
-        <Text style={styles.value}>{role}</Text>
+        <Text style={styles.value}>{translateRole(role)}</Text>
       </View>
 
       <TouchableOpacity
@@ -156,12 +169,12 @@ export default function Profile() {
           style={styles.adminButton}
           onPress={() => router.push('/admin')}
         >
-          <Text style={styles.buttonText}>Админ панель</Text>
+          <Text style={styles.adminButtonText}>Админ панель</Text>
         </TouchableOpacity>
       )}
 
       <TouchableOpacity style={styles.logoutButton} onPress={logout}>
-        <Text style={styles.buttonText}>Выйти</Text>
+        <Text style={styles.logoutButtonText}>Выйти</Text>
       </TouchableOpacity>
 
       <Modal visible={editVisible} animationType="slide" transparent>
@@ -206,7 +219,7 @@ export default function Profile() {
               style={styles.cancelButton}
               onPress={() => setEditVisible(false)}
             >
-              <Text style={styles.buttonText}>Отмена</Text>
+              <Text style={styles.cancelButtonText}>Отмена</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -221,98 +234,103 @@ const styles = StyleSheet.create({
     backgroundColor: '#020617',
     padding: 20,
   },
-
   title: {
     color: '#fff',
     fontSize: 28,
     marginBottom: 20,
     fontWeight: '700',
   },
-
   card: {
     backgroundColor: '#111827',
     padding: 16,
     borderRadius: 16,
     marginBottom: 20,
   },
-
   label: {
     color: '#9ca3af',
     marginTop: 10,
     fontSize: 12,
   },
-
   value: {
     color: '#fff',
     fontSize: 16,
     marginTop: 2,
   },
-
   button: {
     backgroundColor: '#22c55e',
     padding: 15,
     borderRadius: 12,
     marginBottom: 10,
   },
-
   adminButton: {
     backgroundColor: '#3b82f6',
     padding: 15,
     borderRadius: 12,
     marginBottom: 10,
   },
-
   logoutButton: {
     backgroundColor: '#ef4444',
     padding: 15,
     borderRadius: 12,
   },
-
   buttonText: {
     textAlign: 'center',
     fontWeight: '700',
     color: '#000',
   },
-
+  adminButtonText: {
+    textAlign: 'center',
+    fontWeight: '700',
+    color: '#fff',
+  },
+  logoutButtonText: {
+    textAlign: 'center',
+    fontWeight: '700',
+    color: '#fff',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'center',
     padding: 20,
   },
-
   modal: {
     backgroundColor: '#020617',
     padding: 20,
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
-
   modalTitle: {
     color: '#fff',
     fontSize: 20,
     marginBottom: 16,
     fontWeight: '700',
   },
-
   input: {
     backgroundColor: '#111827',
     color: '#fff',
     padding: 12,
     borderRadius: 10,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
-
   saveButton: {
     backgroundColor: '#22c55e',
     padding: 14,
     borderRadius: 12,
     marginTop: 10,
   },
-
   cancelButton: {
     backgroundColor: '#374151',
     padding: 14,
     borderRadius: 12,
     marginTop: 10,
+  },
+  cancelButtonText: {
+    textAlign: 'center',
+    fontWeight: '700',
+    color: '#fff',
   },
 })

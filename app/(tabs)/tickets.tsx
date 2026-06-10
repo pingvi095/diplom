@@ -12,11 +12,13 @@ import {
 import { supabase } from '../../lib/supabase'
 import { formatIsoDateForDisplay } from '../../lib/validation'
 
+// Перевод всех возможных статусов билета на русский язык
 const statusLabels: Record<string, string> = {
-  approved: 'Активен',
-  active: 'Активен',
-  pending: 'Ожидает',
-  declined: 'Отклонён',
+  approved: 'Активен ✅',
+  active: 'Активен ✅',
+  pending: 'В ожидании ⏳',
+  declined: 'Отклонён ❌',
+  rejected: 'Отклонён ❌',
 }
 
 export default function Tickets() {
@@ -72,6 +74,13 @@ export default function Tickets() {
     setTickets(Array.isArray(data) ? data : [])
   }
 
+  // Функция для красивой подсветки разных статусов
+  const getStatusColor = (status: string) => {
+    if (status === 'pending') return '#eab308' // Желтый
+    if (status === 'declined' || status === 'rejected') return '#ef4444' // Красный
+    return '#22c55e' // Зеленый для активных
+  }
+
   const renderItem = ({ item }: any) => {
     const event = item.events
 
@@ -102,7 +111,7 @@ export default function Tickets() {
           <Text style={styles.text}>📏 {event.distance_km} км</Text>
         )}
 
-        <Text style={styles.status}>
+        <Text style={[styles.status, { color: getStatusColor(status) }]}>
           Статус: {statusLabels[status] || status}
         </Text>
       </TouchableOpacity>
@@ -155,12 +164,16 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   card: {
     backgroundColor: '#111827',
     padding: 16,
     borderRadius: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   badge: {
     color: '#22c55e',
@@ -177,14 +190,15 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   status: {
-    color: '#22c55e',
-    marginTop: 10,
+    marginTop: 12,
     fontWeight: '700',
   },
   emptyCard: {
     backgroundColor: '#111827',
     borderRadius: 16,
     padding: 20,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   emptyTitle: {
     color: '#fff',

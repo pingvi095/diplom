@@ -18,7 +18,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title: 'Discover',
+          title: 'Главная',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
@@ -28,7 +28,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="saved"
         options={{
-          title: 'Saved',
+          title: 'Избранное',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="heart-outline" size={size} color={color} />
           ),
@@ -38,18 +38,18 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="invitations"
         options={{
-          title: 'Invites',
+          title: 'Приглашения',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="mail-outline" size={size} color={color} />
           ),
         }}
       />
 
-      {/* 🔥 НОВАЯ ВКЛАДКА */}
+      {/* Мои события (для организаторов) */}
       <Tabs.Screen
         name="my-events"
         options={{
-          title: 'My Events',
+          title: 'Мои события',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
           ),
@@ -59,7 +59,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="tickets"
         options={{
-          title: 'Tickets',
+          title: 'Билеты',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="ticket-outline" size={size} color={color} />
           ),
@@ -69,7 +69,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Account',
+          title: 'Профиль',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-outline" size={size} color={color} />
           ),

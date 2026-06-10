@@ -31,8 +31,13 @@ type DistanceFilter = 'default' | 'near' | 'far'
 type AlphaFilter = 'default' | 'az' | 'za'
 type DateFilter = 'default' | 'new' | 'old'
 
+type ParticipantRow = {
+  event_id: string
+}
+
 export default function Home() {
   const [events, setEvents] = useState<any[]>([])
+  const [participants, setParticipants] = useState<ParticipantRow[]>([])
   const [favorites, setFavorites] = useState<string[]>([])
   const [role, setRole] = useState('participant')
   const [search, setSearch] = useState('')
@@ -75,7 +80,7 @@ export default function Home() {
 
   const loadAll = async () => {
     setLoading(true)
-    await Promise.all([loadEvents(), loadFavorites(), loadRole()])
+    await Promise.all([loadEvents(), loadFavorites(), loadRole(), loadParticipants()])
     setLoading(false)
   }
 
@@ -91,6 +96,21 @@ export default function Home() {
     }
 
     setEvents(data || [])
+  }
+
+  // ИСПРАВЛЕНО: Теперь берем реальных одобренных участников из таблицы tickets
+  const loadParticipants = async () => {
+    const { data, error } = await supabase
+      .from('tickets')
+      .select('event_id')
+      .eq('status', 'approved')
+
+    if (error) {
+      Alert.alert('Ошибка', error.message)
+      return
+    }
+
+    setParticipants((data || []) as ParticipantRow[])
   }
 
   const loadFavorites = async () => {
@@ -153,9 +173,7 @@ export default function Home() {
         .eq('event_id', eventId)
         .eq('user_id', user.id)
     } else {
-      await supabase.from('favorites').insert([
-        { event_id: eventId, user_id: user.id },
-      ])
+      await supabase.from('favorites').insert([{ event_id: eventId, user_id: user.id }])
     }
 
     loadFavorites()
@@ -209,6 +227,34 @@ export default function Home() {
   const filtered = useMemo(() => {
     let list = [...eventsWithDistance]
 
+    const participantsCountByEventId = participants.reduce<Record<string, number>>(
+      (acc, participant) => {
+        const eventId = String(participant.event_id)
+        acc[eventId] = (acc[eventId] || 0) + 1
+        return acc
+      },
+      {}
+    )
+
+    // ИСПРАВЛЕНО: Более строгая проверка ролей. Обычные пользователи и гости НЕ видят заполненные карточки.
+    if (role !== 'organizer' && role !== 'admin') {
+      list = list.filter((event) => {
+        const maxParticipants = Number(event.max_participants)
+
+        if (
+          event.max_participants === null ||
+          event.max_participants === undefined ||
+          Number.isNaN(maxParticipants) ||
+          maxParticipants <= 0
+        ) {
+          return true
+        }
+
+        const currentCount = participantsCountByEventId[String(event.id)] || 0
+        return currentCount < maxParticipants
+      })
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(
@@ -243,7 +289,7 @@ export default function Home() {
 
     if (alpha === 'za') {
       list.sort((a, b) =>
-        String(b.title || '').localeCompare(String(a.title || ''))
+        String(b.title || '').localeCompare(String(b.title || ''))
       )
     }
 
@@ -256,7 +302,7 @@ export default function Home() {
     }
 
     return list
-  }, [eventsWithDistance, search, age, distanceSort, alpha, dateSort])
+  }, [eventsWithDistance, participants, role, search, age, distanceSort, alpha, dateSort])
 
   const resetFilters = () => {
     setAge('all')
@@ -289,9 +335,19 @@ export default function Home() {
   const renderItem = ({ item }: any) => {
     const isFav = favorites.includes(String(item.id))
 
+    const currentCount =
+      participants.filter((p) => String(p.event_id) === String(item.id)).length || 0
+
+    const maxParticipants = Number(item.max_participants)
+    const isFilled =
+      item.max_participants != null &&
+      !Number.isNaN(maxParticipants) &&
+      maxParticipants > 0 &&
+      currentCount >= maxParticipants
+
     return (
       <TouchableOpacity
-        style={styles.card}
+        style={[styles.card, isFilled && styles.cardFilled]}
         activeOpacity={0.9}
         onPress={() =>
           router.push({
@@ -325,12 +381,20 @@ export default function Home() {
           <Text style={styles.info}>📅 {formatIsoDateForDisplay(item.date)}</Text>
           <Text style={styles.info}>📍 {item.location || 'Место не указано'}</Text>
 
-          {!!item.age_limit && (
-            <Text style={styles.info}>🔞 {item.age_limit}+</Text>
-          )}
+          {!!item.age_limit && <Text style={styles.info}>🔞 {item.age_limit}+</Text>}
 
           {item.distance != null && (
             <Text style={styles.info}>📏 {item.distance.toFixed(1)} км от вас</Text>
+          )}
+
+          {item.max_participants != null && Number(item.max_participants) > 0 && (
+            <Text style={styles.info}>
+              👥 {currentCount}/{item.max_participants}
+            </Text>
+          )}
+
+          {isFilled && (
+            <Text style={styles.filledText}>Набор завершён</Text>
           )}
         </View>
       </TouchableOpacity>
@@ -511,6 +575,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     overflow: 'hidden',
   },
+  cardFilled: {
+    opacity: 0.85,
+  },
   image: {
     width: '100%',
     height: 160,
@@ -537,6 +604,11 @@ const styles = StyleSheet.create({
   info: {
     color: '#fff',
     marginTop: 6,
+  },
+  filledText: {
+    color: '#f59e0b',
+    marginTop: 8,
+    fontWeight: '700',
   },
   centerBox: {
     backgroundColor: '#111827',

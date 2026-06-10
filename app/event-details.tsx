@@ -13,6 +13,7 @@ import {
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import { formatIsoDateForDisplay } from '../lib/validation'
+import * as Location from 'expo-location'
 
 const DEFAULT_IMAGE =
   'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
@@ -24,6 +25,22 @@ type Participant = {
     full_name?: string | null
     email?: string | null
   } | null
+}
+
+// ФУНКЦИЯ РАСЧЕТА РАССТОЯНИЯ (Формула гаверсинусов)
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371e3 // Радиус Земли в метрах
+  const p1 = (lat1 * Math.PI) / 180
+  const p2 = (lat2 * Math.PI) / 180
+  const deltaLat = ((lat2 - lat1) * Math.PI) / 180
+  const deltaLon = ((lon2 - lon1) * Math.PI) / 180
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(p1) * Math.cos(p2) * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return R * c 
 }
 
 export default function EventDetails() {
@@ -39,9 +56,59 @@ export default function EventDetails() {
   const [loading, setLoading] = useState(true)
   const [joining, setJoining] = useState(false)
 
+  // Новые стейты для расстояния
+  const [distanceText, setDistanceText] = useState<string>('')
+  const [distanceLoading, setDistanceLoading] = useState<boolean>(false)
+
   useEffect(() => {
     if (eventId) loadAll()
   }, [eventId])
+
+  // Эффект для расчета расстояния, срабатывает когда event загружен
+  useEffect(() => {
+    if (!event?.latitude || !event?.longitude) return
+
+    async function getEventDistance() {
+      setDistanceLoading(true)
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync()
+        if (status !== 'granted') {
+          setDistanceText('Нет доступа к геопозиции')
+          return
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced, // Точность ~100 метров
+        })
+
+        const userLat = location.coords.latitude
+        const userLon = location.coords.longitude
+
+        const rawDistance = calculateDistance(
+          userLat,
+          userLon,
+          Number(event.latitude),
+          Number(event.longitude)
+        )
+
+        // Округляем до ближайших 100 метров для соблюдения погрешности
+        const roundedDistance = Math.round(rawDistance / 100) * 100
+
+        if (roundedDistance >= 1000) {
+          setDistanceText(`~${(roundedDistance / 1000).toFixed(1)} км от вас`)
+        } else {
+          setDistanceText(`~${roundedDistance} м от вас`)
+        }
+      } catch (error) {
+        console.log('Location error:', error)
+        setDistanceText('Не удалось определить расстояние')
+      } finally {
+        setDistanceLoading(false)
+      }
+    }
+
+    getEventDistance()
+  }, [event?.latitude, event?.longitude])
 
   const loadAll = async () => {
     setLoading(true)
@@ -307,6 +374,17 @@ export default function EventDetails() {
         <View style={styles.infoCard}>
           <Text style={styles.info}>📅 {formatIsoDateForDisplay(event.date)}</Text>
           <Text style={styles.info}>📍 {event.location || 'Место не указано'}</Text>
+          
+          {/* ИНТЕГРАЦИЯ ВЫВОДА РАССТОЯНИЯ */}
+          {distanceLoading ? (
+            <View style={styles.distanceLoadingBox}>
+              <ActivityIndicator size="small" color="#22c55e" />
+              <Text style={styles.distanceLoadingText}>Вычисляем расстояние...</Text>
+            </View>
+          ) : distanceText ? (
+            <Text style={styles.distanceText}>🧭 {distanceText}</Text>
+          ) : null}
+
           <Text style={styles.info}>
             🔞 {event.age_limit ? `${event.age_limit}+` : 'Без ограничения'}
           </Text>
@@ -406,6 +484,24 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   info: { color: '#fff', marginTop: 6 },
+  
+  // Новые стили для отображения расстояния
+  distanceText: { 
+    color: '#22c55e', 
+    marginTop: 6, 
+    fontWeight: '600' 
+  },
+  distanceLoadingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  distanceLoadingText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginLeft: 6,
+  },
+
   button: {
     backgroundColor: '#22c55e',
     padding: 16,

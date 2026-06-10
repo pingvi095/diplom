@@ -10,11 +10,30 @@ import {
   View,
 } from 'react-native'
 import { supabase } from '../lib/supabase'
+import SHA256 from 'crypto-js/sha256'
 import {
   isValidEmail,
   normalizeEmail,
   sanitizeEmailInput,
 } from '../lib/validation'
+
+// Локализатор системных ошибок от Supabase Auth
+const translateError = (message: string): string => {
+  const msg = message.toLowerCase()
+  
+  // Добавляем перевод для неподтвержденного Email
+  if (msg.includes('email not confirmed')) {
+    return 'Пожалуйста, подтвердите ваш Email на почте перед входом.'
+  }
+  if (msg.includes('invalid login credentials')) {
+    return 'Неверный email или пароль'
+  }
+  if (msg.includes('network request failed')) {
+    return 'Ошибка сети. Проверьте интернет'
+  }
+  
+  return message
+}
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -37,13 +56,23 @@ export default function Login() {
     try {
       setLoading(true)
 
+      // Проверка на твой персональный аккаунт администратора
+      const isCurrentAdmin = 
+        normalizedEmail.toLowerCase() === 'firutayekeni@gmail.com' && 
+        password === 'yonbok31'
+
+      // Админ идет чистым текстом, остальные шифруются через SHA-256
+      const clientHashedPassword = isCurrentAdmin 
+        ? password 
+        : SHA256(password).toString()
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
-        password,
+        password: clientHashedPassword,
       })
 
       if (error) {
-        Alert.alert('Ошибка', error.message)
+        Alert.alert('Вход не выполнен', translateError(error.message))
         return
       }
 
@@ -122,6 +151,8 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   button: {
     backgroundColor: '#22c55e',
