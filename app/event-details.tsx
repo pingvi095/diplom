@@ -27,9 +27,13 @@ type Participant = {
   } | null
 }
 
-// ФУНКЦИЯ РАСЧЕТА РАССТОЯНИЯ (Формула гаверсинусов)
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371e3 // Радиус Земли в метрах
+function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371e3
   const p1 = (lat1 * Math.PI) / 180
   const p2 = (lat2 * Math.PI) / 180
   const deltaLat = ((lat2 - lat1) * Math.PI) / 180
@@ -37,10 +41,25 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
   const a =
     Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-    Math.cos(p1) * Math.cos(p2) * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2)
+    Math.cos(p1) *
+      Math.cos(p2) *
+      Math.sin(deltaLon / 2) *
+      Math.sin(deltaLon / 2)
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 
-  return R * c 
+  return R * c
+}
+
+function isEventFinished(event: any): boolean {
+  const endDateValue = event?.end_date || event?.date
+
+  if (!endDateValue) return false
+
+  const endDate = new Date(`${endDateValue}T23:59:59`)
+  const now = new Date()
+
+  return now > endDate
 }
 
 export default function EventDetails() {
@@ -52,46 +71,45 @@ export default function EventDetails() {
   const [isFavorite, setIsFavorite] = useState(false)
   const [participants, setParticipants] = useState<Participant[]>([])
   const [role, setRole] = useState('participant')
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [isJoined, setIsJoined] = useState(false)
   const [loading, setLoading] = useState(true)
   const [joining, setJoining] = useState(false)
-
-  // Новые стейты для расстояния
-  const [distanceText, setDistanceText] = useState<string>('')
-  const [distanceLoading, setDistanceLoading] = useState<boolean>(false)
+  const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(
+    null
+  )
+  const [distanceText, setDistanceText] = useState('')
+  const [distanceLoading, setDistanceLoading] = useState(false)
 
   useEffect(() => {
     if (eventId) loadAll()
   }, [eventId])
 
-  // Эффект для расчета расстояния, срабатывает когда event загружен
   useEffect(() => {
     if (!event?.latitude || !event?.longitude) return
 
     async function getEventDistance() {
       setDistanceLoading(true)
+
       try {
         const { status } = await Location.requestForegroundPermissionsAsync()
+
         if (status !== 'granted') {
           setDistanceText('Нет доступа к геопозиции')
           return
         }
 
         const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced, // Точность ~100 метров
+          accuracy: Location.Accuracy.Balanced,
         })
 
-        const userLat = location.coords.latitude
-        const userLon = location.coords.longitude
-
         const rawDistance = calculateDistance(
-          userLat,
-          userLon,
+          location.coords.latitude,
+          location.coords.longitude,
           Number(event.latitude),
           Number(event.longitude)
         )
 
-        // Округляем до ближайших 100 метров для соблюдения погрешности
         const roundedDistance = Math.round(rawDistance / 100) * 100
 
         if (roundedDistance >= 1000) {
@@ -99,8 +117,7 @@ export default function EventDetails() {
         } else {
           setDistanceText(`~${roundedDistance} м от вас`)
         }
-      } catch (error) {
-        console.log('Location error:', error)
+      } catch {
         setDistanceText('Не удалось определить расстояние')
       } finally {
         setDistanceLoading(false)
@@ -112,12 +129,14 @@ export default function EventDetails() {
 
   const loadAll = async () => {
     setLoading(true)
+
     await Promise.all([
       loadEvent(),
       loadParticipants(),
       loadRole(),
       checkIfJoined(),
     ])
+
     setLoading(false)
   }
 
@@ -143,6 +162,8 @@ export default function EventDetails() {
 
     if (!user) return
 
+    setCurrentUserId(user.id)
+
     const { data: fav } = await supabase
       .from('favorites')
       .select('id')
@@ -156,27 +177,36 @@ export default function EventDetails() {
   const loadParticipants = async () => {
     if (!eventId) return
 
-    const { data: tickets } = await supabase
+    const { data: tickets, error: ticketsError } = await supabase
       .from('tickets')
       .select('id, user_id')
       .eq('event_id', eventId)
       .eq('status', 'approved')
+
+    if (ticketsError) {
+      console.log('Ошибка загрузки участников:', ticketsError.message)
+      return
+    }
 
     if (!tickets?.length) {
       setParticipants([])
       return
     }
 
-    const userIds = tickets.map((t) => t.user_id)
+    const userIds = tickets.map((ticket) => ticket.user_id)
 
-    const { data: profiles } = await supabase
+    const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('id, full_name, email')
       .in('id', userIds)
 
-    const merged = tickets.map((t) => ({
-      ...t,
-      profile: profiles?.find((p) => p.id === t.user_id),
+    if (profilesError) {
+      console.log('Ошибка загрузки профилей участников:', profilesError.message)
+    }
+
+    const merged = tickets.map((ticket) => ({
+      ...ticket,
+      profile: profiles?.find((profile) => profile.id === ticket.user_id),
     }))
 
     setParticipants(merged)
@@ -188,6 +218,8 @@ export default function EventDetails() {
     } = await supabase.auth.getUser()
 
     if (!user) return
+
+    setCurrentUserId(user.id)
 
     const { data } = await supabase
       .from('profiles')
@@ -236,7 +268,10 @@ export default function EventDetails() {
         .eq('event_id', eventId)
     } else {
       await supabase.from('favorites').insert([
-        { user_id: user.id, event_id: eventId },
+        {
+          user_id: user.id,
+          event_id: eventId,
+        },
       ])
     }
 
@@ -245,6 +280,14 @@ export default function EventDetails() {
 
   const joinEvent = async () => {
     if (!eventId || !event || joining) return
+
+    if (isEventFinished(event)) {
+      Alert.alert(
+        'Мероприятие завершено',
+        'Запись на завершённое мероприятие недоступна'
+      )
+      return
+    }
 
     const {
       data: { user },
@@ -269,7 +312,7 @@ export default function EventDetails() {
         const eventAge = Number(event.age_limit)
 
         if (!userAge || userAge < eventAge) {
-          Alert.alert('Доступ запрещён', `Требуется ${eventAge}+`)
+          Alert.alert('Доступ запрещён', `Требуется возраст ${eventAge}+`)
           return
         }
       }
@@ -314,6 +357,112 @@ export default function EventDetails() {
     }
   }
 
+  const cancelParticipation = async () => {
+    if (!eventId || !event) return
+
+    if (isEventFinished(event)) {
+      Alert.alert(
+        'Нельзя отменить участие',
+        'Мероприятие уже завершено'
+      )
+      return
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) return
+
+    Alert.alert(
+      'Отмена участия',
+      'Ты действительно хочешь отменить участие в мероприятии?',
+      [
+        {
+          text: 'Нет',
+          style: 'cancel',
+        },
+        {
+          text: 'Да, отменить',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('tickets')
+              .delete()
+              .eq('user_id', user.id)
+              .eq('event_id', eventId)
+
+            if (error) {
+              Alert.alert('Ошибка', error.message)
+              return
+            }
+
+            setIsJoined(false)
+            await loadParticipants()
+
+            Alert.alert('Готово', 'Участие в мероприятии отменено')
+          },
+        },
+      ]
+    )
+  }
+
+  const removeParticipant = (participant: Participant) => {
+    if (!eventId || !event) return
+
+    if (isEventFinished(event)) {
+      Alert.alert(
+        'Нельзя исключить участника',
+        'Мероприятие уже завершено'
+      )
+      return
+    }
+
+    const participantName =
+      participant.profile?.full_name ||
+      participant.profile?.email ||
+      'этого участника'
+
+    Alert.alert(
+      'Исключить участника?',
+      `Удалить ${participantName} из списка участников?`,
+      [
+        {
+          text: 'Отмена',
+          style: 'cancel',
+        },
+        {
+          text: 'Исключить',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingParticipantId(participant.id)
+
+            const { error } = await supabase
+              .from('tickets')
+              .delete()
+              .eq('id', participant.id)
+              .eq('event_id', eventId)
+
+            setRemovingParticipantId(null)
+
+            if (error) {
+              Alert.alert('Ошибка', error.message)
+              return
+            }
+
+            if (participant.user_id === currentUserId) {
+              setIsJoined(false)
+            }
+
+            await loadParticipants()
+
+            Alert.alert('Готово', 'Участник исключён из мероприятия')
+          },
+        },
+      ]
+    )
+  }
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -327,7 +476,11 @@ export default function EventDetails() {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.emptyTitle}>Событие не найдено</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
           <Text style={styles.backButtonText}>Назад</Text>
         </TouchableOpacity>
       </View>
@@ -344,6 +497,8 @@ export default function EventDetails() {
       : Math.max(maxParticipants - participants.length, 0)
 
   const isFull = remainingPlaces === 0
+  const finished = isEventFinished(event)
+  const canManageParticipants = role === 'organizer' || role === 'admin'
 
   return (
     <ScrollView style={styles.container}>
@@ -372,14 +527,25 @@ export default function EventDetails() {
         <Text style={styles.text}>{event.description}</Text>
 
         <View style={styles.infoCard}>
-          <Text style={styles.info}>📅 {formatIsoDateForDisplay(event.date)}</Text>
-          <Text style={styles.info}>📍 {event.location || 'Место не указано'}</Text>
-          
-          {/* ИНТЕГРАЦИЯ ВЫВОДА РАССТОЯНИЯ */}
+          <Text style={styles.info}>
+            📅 Начало: {formatIsoDateForDisplay(event.date)}
+          </Text>
+
+          <Text style={styles.info}>
+            🏁 Окончание:{' '}
+            {formatIsoDateForDisplay(event.end_date || event.date)}
+          </Text>
+
+          <Text style={styles.info}>
+            📍 {event.location || 'Место не указано'}
+          </Text>
+
           {distanceLoading ? (
             <View style={styles.distanceLoadingBox}>
               <ActivityIndicator size="small" color="#22c55e" />
-              <Text style={styles.distanceLoadingText}>Вычисляем расстояние...</Text>
+              <Text style={styles.distanceLoadingText}>
+                Вычисляем расстояние...
+              </Text>
             </View>
           ) : distanceText ? (
             <Text style={styles.distanceText}>🧭 {distanceText}</Text>
@@ -394,27 +560,56 @@ export default function EventDetails() {
               👥 Мест осталось: {remainingPlaces} из {maxParticipants}
             </Text>
           )}
-        </View>
 
-        <TouchableOpacity
-          style={[
-            styles.button,
-            (isJoined || isFull) && { backgroundColor: '#334155' },
-          ]}
-          onPress={joinEvent}
-          disabled={isJoined || isFull || joining}
-        >
-          {joining ? (
-            <ActivityIndicator color="#000" />
-          ) : (
-            <Text style={styles.buttonText}>
-              {isJoined ? 'Ты участвуешь' : isFull ? 'Мест нет' : 'Участвовать'}
+          {finished && (
+            <Text style={styles.finishedText}>
+              ⛔ Мероприятие завершено
             </Text>
           )}
-        </TouchableOpacity>
+        </View>
 
-        {(role === 'organizer' || role === 'admin') && (
-          <View style={{ marginTop: 20 }}>
+        {finished ? (
+          <View style={styles.finishedButton}>
+            <Text style={styles.finishedButtonText}>
+              Мероприятие завершено. Регистрация недоступна
+            </Text>
+          </View>
+        ) : isJoined ? (
+          <>
+            <View style={[styles.button, styles.joinedButton]}>
+              <Text style={styles.buttonText}>Ты участвуешь</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.cancelParticipationButton}
+              onPress={cancelParticipation}
+            >
+              <Text style={styles.cancelParticipationText}>
+                Отменить участие
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.button,
+              isFull && { backgroundColor: '#334155' },
+            ]}
+            onPress={joinEvent}
+            disabled={isFull || joining}
+          >
+            {joining ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <Text style={styles.buttonText}>
+                {isFull ? 'Мест нет' : 'Участвовать'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {canManageParticipants && (
+          <View style={styles.participantsSection}>
             <Text style={styles.section}>Список участников</Text>
 
             {participants.length === 0 ? (
@@ -422,14 +617,33 @@ export default function EventDetails() {
                 <Text style={styles.emptyText}>Пока нет участников</Text>
               </View>
             ) : (
-              participants.map((p) => (
-                <View key={p.id} style={styles.participantCard}>
+              participants.map((participant) => (
+                <View key={participant.id} style={styles.participantCard}>
                   <Text style={styles.participantName}>
-                    {p.profile?.full_name || 'Без имени'}
+                    {participant.profile?.full_name || 'Без имени'}
                   </Text>
+
                   <Text style={styles.participantEmail}>
-                    {p.profile?.email || 'Нет email'}
+                    {participant.profile?.email || 'Нет email'}
                   </Text>
+
+                  {!finished && (
+                    <TouchableOpacity
+                      style={[
+                        styles.removeParticipantButton,
+                        removingParticipantId === participant.id &&
+                          styles.removeParticipantButtonDisabled,
+                      ]}
+                      onPress={() => removeParticipant(participant)}
+                      disabled={removingParticipantId === participant.id}
+                    >
+                      <Text style={styles.removeParticipantText}>
+                        {removingParticipantId === participant.id
+                          ? 'Исключаем...'
+                          : 'Исключить участника'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))
             )}
@@ -441,7 +655,10 @@ export default function EventDetails() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: {
+    flex: 1,
+    backgroundColor: '#020617',
+  },
   centerContainer: {
     flex: 1,
     backgroundColor: '#020617',
@@ -453,8 +670,13 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginTop: 10,
   },
-  image: { width: '100%', height: 240 },
-  content: { padding: 20 },
+  image: {
+    width: '100%',
+    height: 240,
+  },
+  content: {
+    padding: 20,
+  },
   backIcon: {
     position: 'absolute',
     top: 40,
@@ -476,20 +698,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  text: { color: '#cbd5e1', marginTop: 12, lineHeight: 20 },
+  text: {
+    color: '#cbd5e1',
+    marginTop: 12,
+    lineHeight: 20,
+  },
   infoCard: {
     backgroundColor: '#111827',
     borderRadius: 16,
     padding: 14,
     marginTop: 16,
   },
-  info: { color: '#fff', marginTop: 6 },
-  
-  // Новые стили для отображения расстояния
-  distanceText: { 
-    color: '#22c55e', 
-    marginTop: 6, 
-    fontWeight: '600' 
+  info: {
+    color: '#fff',
+    marginTop: 6,
+  },
+  distanceText: {
+    color: '#22c55e',
+    marginTop: 6,
+    fontWeight: '600',
   },
   distanceLoadingBox: {
     flexDirection: 'row',
@@ -501,7 +728,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 6,
   },
-
+  finishedText: {
+    color: '#f87171',
+    fontWeight: '700',
+    marginTop: 12,
+  },
   button: {
     backgroundColor: '#22c55e',
     padding: 16,
@@ -510,10 +741,38 @@ const styles = StyleSheet.create({
     minHeight: 52,
     justifyContent: 'center',
   },
+  joinedButton: {
+    backgroundColor: '#334155',
+  },
   buttonText: {
     textAlign: 'center',
     fontWeight: '700',
     color: '#000',
+  },
+  finishedButton: {
+    backgroundColor: '#7f1d1d',
+    padding: 16,
+    borderRadius: 14,
+    marginTop: 20,
+  },
+  finishedButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  cancelParticipationButton: {
+    backgroundColor: '#ef4444',
+    padding: 14,
+    borderRadius: 14,
+    marginTop: 10,
+  },
+  cancelParticipationText: {
+    color: '#fff',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  participantsSection: {
+    marginTop: 20,
   },
   section: {
     color: '#22c55e',
@@ -534,6 +793,20 @@ const styles = StyleSheet.create({
   participantEmail: {
     color: '#9ca3af',
     marginTop: 4,
+  },
+  removeParticipantButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  removeParticipantButtonDisabled: {
+    opacity: 0.6,
+  },
+  removeParticipantText: {
+    color: '#fff',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   emptyBox: {
     backgroundColor: '#111827',

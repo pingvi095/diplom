@@ -8,22 +8,37 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native'
 import { supabase } from '../../lib/supabase'
 import { formatIsoDateForDisplay } from '../../lib/validation'
 
-// Перевод всех возможных статусов билета на русский язык
 const statusLabels: Record<string, string> = {
   approved: 'Активен ✅',
   active: 'Активен ✅',
   pending: 'В ожидании ⏳',
   declined: 'Отклонён ❌',
   rejected: 'Отклонён ❌',
+  cancelled: 'Отменён ❌',
+}
+
+const isEventFinished = (endDate: string | null | undefined) => {
+  if (!endDate) return false
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const eventEndDate = new Date(`${endDate}T00:00:00`)
+  eventEndDate.setHours(0, 0, 0, 0)
+
+  return today > eventEndDate
 }
 
 export default function Tickets() {
   const [tickets, setTickets] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+
   const router = useRouter()
 
   useFocusEffect(
@@ -56,6 +71,7 @@ export default function Tickets() {
           id,
           title,
           date,
+          end_date,
           location,
           age_limit,
           distance_km
@@ -74,11 +90,53 @@ export default function Tickets() {
     setTickets(Array.isArray(data) ? data : [])
   }
 
-  // Функция для красивой подсветки разных статусов
   const getStatusColor = (status: string) => {
-    if (status === 'pending') return '#eab308' // Желтый
-    if (status === 'declined' || status === 'rejected') return '#ef4444' // Красный
-    return '#22c55e' // Зеленый для активных
+    if (status === 'pending') return '#eab308'
+
+    if (
+      status === 'declined' ||
+      status === 'rejected' ||
+      status === 'cancelled'
+    ) {
+      return '#ef4444'
+    }
+
+    return '#22c55e'
+  }
+
+  const cancelParticipation = (ticketId: string) => {
+    Alert.alert(
+      'Отменить участие?',
+      'Билет останется в списке, но получит статус «Отменён».',
+      [
+        {
+          text: 'Нет',
+          style: 'cancel',
+        },
+        {
+          text: 'Да, отменить',
+          style: 'destructive',
+          onPress: async () => {
+            setCancellingId(ticketId)
+
+            const { error } = await supabase
+              .from('tickets')
+              .update({ status: 'cancelled' })
+              .eq('id', ticketId)
+
+            setCancellingId(null)
+
+            if (error) {
+              Alert.alert('Ошибка', error.message)
+              return
+            }
+
+            Alert.alert('Готово', 'Участие в мероприятии отменено')
+            loadTickets()
+          },
+        },
+      ]
+    )
   }
 
   const renderItem = ({ item }: any) => {
@@ -87,34 +145,77 @@ export default function Tickets() {
     if (!event) return null
 
     const status = item.status || 'active'
+    const finished = isEventFinished(event.end_date)
+
+    const canCancel =
+      !finished && (status === 'approved' || status === 'active' || status === 'pending')
 
     return (
-      <TouchableOpacity
-        style={styles.card}
-        activeOpacity={0.9}
-        onPress={() =>
-          router.push({
-            pathname: '/ticket-details',
-            params: { eventId: item.event_id },
-          })
-        }
-      >
-        <Text style={styles.badge}>🎟️ Билет</Text>
-        <Text style={styles.title}>{event.title}</Text>
-        <Text style={styles.text}>📅 {formatIsoDateForDisplay(event.date)}</Text>
-        <Text style={styles.text}>📍 {event.location || 'Место не указано'}</Text>
-        <Text style={styles.text}>
-          🔞 {event.age_limit ? `${event.age_limit}+` : 'Без ограничения'}
-        </Text>
+      <View style={[styles.card, finished && styles.finishedCard]}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() =>
+            router.push({
+              pathname: '/ticket-details',
+              params: { eventId: item.event_id },
+            })
+          }
+        >
+          <Text style={styles.badge}>🎟️ Билет</Text>
 
-        {event.distance_km !== null && event.distance_km !== undefined && (
-          <Text style={styles.text}>📏 {event.distance_km} км</Text>
+          <Text style={styles.title}>{event.title}</Text>
+
+          <Text style={styles.text}>
+            📅 Начало: {formatIsoDateForDisplay(event.date)}
+          </Text>
+
+          <Text style={styles.text}>
+            🏁 Окончание:{' '}
+            {event.end_date
+              ? formatIsoDateForDisplay(event.end_date)
+              : 'Не указано'}
+          </Text>
+
+          <Text style={styles.text}>
+            📍 {event.location || 'Место не указано'}
+          </Text>
+
+          <Text style={styles.text}>
+            🔞 {event.age_limit ? `${event.age_limit}+` : 'Без ограничения'}
+          </Text>
+
+          {event.distance_km !== null && event.distance_km !== undefined && (
+            <Text style={styles.text}>📏 {event.distance_km} км</Text>
+          )}
+
+          {finished ? (
+            <Text style={styles.invalidText}>
+              Билет недействителен — мероприятие завершено
+            </Text>
+          ) : (
+            <Text style={[styles.status, { color: getStatusColor(status) }]}>
+              Статус: {statusLabels[status] || status}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {canCancel && (
+          <TouchableOpacity
+            style={[
+              styles.cancelButton,
+              cancellingId === item.id && styles.cancelButtonDisabled,
+            ]}
+            onPress={() => cancelParticipation(item.id)}
+            disabled={cancellingId === item.id}
+          >
+            <Text style={styles.cancelButtonText}>
+              {cancellingId === item.id
+                ? 'Отмена...'
+                : 'Отменить участие'}
+            </Text>
+          </TouchableOpacity>
         )}
-
-        <Text style={[styles.status, { color: getStatusColor(status) }]}>
-          Статус: {statusLabels[status] || status}
-        </Text>
-      </TouchableOpacity>
+      </View>
     )
   }
 
@@ -130,7 +231,7 @@ export default function Tickets() {
       ) : (
         <FlatList
           data={tickets}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: 40 }}
           ListEmptyComponent={
@@ -175,6 +276,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1e293b',
   },
+  finishedCard: {
+    borderColor: '#ef4444',
+    opacity: 0.8,
+  },
   badge: {
     color: '#22c55e',
     fontWeight: '700',
@@ -192,6 +297,26 @@ const styles = StyleSheet.create({
   status: {
     marginTop: 12,
     fontWeight: '700',
+  },
+  invalidText: {
+    color: '#ef4444',
+    marginTop: 12,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  cancelButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 14,
+  },
+  cancelButtonDisabled: {
+    opacity: 0.6,
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   emptyCard: {
     backgroundColor: '#111827',

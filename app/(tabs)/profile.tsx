@@ -1,134 +1,181 @@
-import { useEffect, useState } from 'react'
+import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   Alert,
-  TextInput,
   Modal,
-} from 'react-native'
-import { supabase } from '../../lib/supabase'
-import { useRouter } from 'expo-router'
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { supabase } from "../../lib/supabase";
 import {
   sanitizeDigits,
   sanitizeName,
   sanitizePhone,
-} from '../../lib/validation'
+} from "../../lib/validation";
+
+const MIN_AGE = 12;
+const MAX_AGE = 100;
+
+const MAX_NAME_LENGTH = 50;
+const MAX_PHONE_LENGTH = 11;
+const MAX_AGE_LENGTH = 3;
 
 export default function Profile() {
-  const [email, setEmail] = useState('')
-  const [role, setRole] = useState('participant')
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("participant");
 
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [age, setAge] = useState<number | null>(null)
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [age, setAge] = useState<number | null>(null);
 
-  const [editVisible, setEditVisible] = useState(false)
+  const [editVisible, setEditVisible] = useState(false);
 
-  const router = useRouter()
+  const router = useRouter();
 
   useEffect(() => {
-    loadProfile()
-  }, [])
+    loadProfile();
+  }, []);
 
   const loadProfile = async () => {
     const {
       data: { user },
-    } = await supabase.auth.getUser()
+    } = await supabase.auth.getUser();
 
-    if (!user) return
+    if (!user) return;
 
-    setEmail(user.email ?? '')
+    setEmail(user.email ?? "");
 
     const { data, error } = await supabase
-      .from('profiles')
-      .select('role, full_name, phone, age')
-      .eq('id', user.id)
-      .maybeSingle()
+      .from("profiles")
+      .select("role, full_name, phone, age")
+      .eq("id", user.id)
+      .maybeSingle();
 
     if (!error && data) {
-      setRole(data.role || 'participant')
-      setName(data.full_name || '')
-      setPhone(data.phone || '')
-      setAge(data.age ?? null)
+      setRole(data.role || "participant");
+      setName(data.full_name || "");
+      setPhone(data.phone || "");
+      setAge(data.age ?? null);
     }
-  }
+  };
 
   const translateRole = (userRole: string) => {
     switch (userRole) {
-      case 'admin':
-        return 'Администратор'
-      case 'organizer':
-        return 'Организатор'
-      case 'participant':
-        return 'Участник'
+      case "admin":
+        return "Администратор";
+      case "organizer":
+        return "Организатор";
+      case "participant":
+        return "Участник";
       default:
-        return userRole
+        return userRole;
     }
-  }
+  };
 
   const requestOrganizer = async () => {
     const {
       data: { user },
-    } = await supabase.auth.getUser()
+    } = await supabase.auth.getUser();
 
-    if (!user) return
+    if (!user) return;
 
     const { data: existing } = await supabase
-      .from('role_requests')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('status', 'pending')
-      .maybeSingle()
+      .from("role_requests")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("status", "pending")
+      .maybeSingle();
 
     if (existing) {
-      Alert.alert('Уже отправлено', 'Вы уже подали заявку')
-      return
+      Alert.alert("Уже отправлено", "Вы уже подали заявку");
+      return;
     }
 
-    const { error } = await supabase.from('role_requests').insert([
+    const { error } = await supabase.from("role_requests").insert([
       {
         user_id: user.id,
       },
-    ])
+    ]);
 
     if (error) {
-      Alert.alert('Ошибка', error.message)
+      Alert.alert("Ошибка", error.message);
     } else {
-      Alert.alert('Готово', 'Заявка отправлена администратору')
+      Alert.alert("Готово", "Заявка отправлена администратору");
     }
-  }
+  };
 
   const saveProfile = async () => {
     const {
       data: { user },
-    } = await supabase.auth.getUser()
+    } = await supabase.auth.getUser();
 
-    if (!user) return
+    if (!user) return;
+
+    const trimmedName = name.trim();
+    const trimmedPhone = phone.trim();
+
+    if (!trimmedName) {
+      Alert.alert("Ошибка", "Введите имя");
+      return;
+    }
+
+    if (
+      trimmedName.length < 2 ||
+      trimmedName.length > MAX_NAME_LENGTH
+    ) {
+      Alert.alert(
+        "Ошибка",
+        `Имя должно содержать от 2 до ${MAX_NAME_LENGTH} символов`
+      );
+      return;
+    }
+
+    if (trimmedPhone && trimmedPhone.length !== MAX_PHONE_LENGTH) {
+      Alert.alert(
+        "Ошибка",
+        `Номер телефона должен состоять из ${MAX_PHONE_LENGTH} цифр`
+      );
+      return;
+    }
+
+    if (age === null || age < MIN_AGE || age > MAX_AGE) {
+      Alert.alert(
+        "Ошибка",
+        `Возраст должен быть от ${MIN_AGE} до ${MAX_AGE} лет`
+      );
+      return;
+    }
 
     const { error } = await supabase
-      .from('profiles')
+      .from("profiles")
       .update({
-        full_name: name.trim(),
-        phone: phone.trim() || null,
+        full_name: trimmedName,
+        phone: trimmedPhone || null,
         age,
       })
-      .eq('id', user.id)
+      .eq("id", user.id);
 
     if (error) {
-      Alert.alert('Ошибка', error.message)
+      Alert.alert("Ошибка", error.message);
     } else {
-      Alert.alert('Успех', 'Изменения сохранены')
-      setEditVisible(false)
-      loadProfile()
+      Alert.alert("Успех", "Изменения сохранены");
+      setEditVisible(false);
+      loadProfile();
     }
-  }
+  };
 
   const logout = async () => {
-    await supabase.auth.signOut()
-    router.replace('/login')
-  }
+    await supabase.auth.signOut();
+    router.replace("/login");
+  };
+
+  const openEditProfile = () => {
+    loadProfile();
+    setEditVisible(true);
+  };
 
   return (
     <View style={styles.container}>
@@ -139,35 +186,32 @@ export default function Profile() {
         <Text style={styles.value}>{email}</Text>
 
         <Text style={styles.label}>Имя</Text>
-        <Text style={styles.value}>{name || 'Не указано'}</Text>
+        <Text style={styles.value}>{name || "Не указано"}</Text>
 
         <Text style={styles.label}>Телефон</Text>
-        <Text style={styles.value}>{phone || 'Не указан'}</Text>
+        <Text style={styles.value}>{phone || "Не указан"}</Text>
 
         <Text style={styles.label}>Возраст</Text>
-        <Text style={styles.value}>{age ?? 'Не указан'}</Text>
+        <Text style={styles.value}>{age ?? "Не указан"}</Text>
 
         <Text style={styles.label}>Роль</Text>
         <Text style={styles.value}>{translateRole(role)}</Text>
       </View>
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => setEditVisible(true)}
-      >
+      <TouchableOpacity style={styles.button} onPress={openEditProfile}>
         <Text style={styles.buttonText}>Редактировать профиль</Text>
       </TouchableOpacity>
 
-      {role === 'participant' && (
+      {role === "participant" && (
         <TouchableOpacity style={styles.button} onPress={requestOrganizer}>
           <Text style={styles.buttonText}>Стать организатором</Text>
         </TouchableOpacity>
       )}
 
-      {role === 'admin' && (
+      {role === "admin" && (
         <TouchableOpacity
           style={styles.adminButton}
-          onPress={() => router.push('/admin')}
+          onPress={() => router.push("/admin")}
         >
           <Text style={styles.adminButtonText}>Админ панель</Text>
         </TouchableOpacity>
@@ -180,7 +224,7 @@ export default function Profile() {
       <Modal visible={editVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Редактировать</Text>
+            <Text style={styles.modalTitle}>Редактировать профиль</Text>
 
             <TextInput
               style={styles.input}
@@ -188,28 +232,43 @@ export default function Profile() {
               placeholderTextColor="#888"
               value={name}
               onChangeText={(text) => setName(sanitizeName(text))}
+              maxLength={MAX_NAME_LENGTH}
             />
+
+            <Text style={styles.counter}>
+              {name.length}/{MAX_NAME_LENGTH}
+            </Text>
 
             <TextInput
               style={styles.input}
-              placeholder="Телефон"
+              placeholder="Телефон (11 цифр)"
               placeholderTextColor="#888"
               value={phone}
               onChangeText={(text) => setPhone(sanitizePhone(text))}
               keyboardType="phone-pad"
+              maxLength={MAX_PHONE_LENGTH}
             />
+
+            <Text style={styles.counter}>
+              {phone.length}/{MAX_PHONE_LENGTH}
+            </Text>
 
             <TextInput
               style={styles.input}
-              placeholder="Возраст"
+              placeholder="Возраст (от 12 лет)"
               placeholderTextColor="#888"
-              value={age === null ? '' : String(age)}
+              value={age === null ? "" : String(age)}
               onChangeText={(text) => {
-                const cleaned = sanitizeDigits(text)
-                setAge(cleaned ? Number(cleaned) : null)
+                const cleaned = sanitizeDigits(text);
+                setAge(cleaned ? Number(cleaned) : null);
               }}
               keyboardType="numeric"
+              maxLength={MAX_AGE_LENGTH}
             />
+
+            <Text style={styles.counter}>
+              {age === null ? 0 : String(age).length}/{MAX_AGE_LENGTH}
+            </Text>
 
             <TouchableOpacity style={styles.saveButton} onPress={saveProfile}>
               <Text style={styles.buttonText}>Сохранить</Text>
@@ -217,7 +276,10 @@ export default function Profile() {
 
             <TouchableOpacity
               style={styles.cancelButton}
-              onPress={() => setEditVisible(false)}
+              onPress={() => {
+                setEditVisible(false);
+                loadProfile();
+              }}
             >
               <Text style={styles.cancelButtonText}>Отмена</Text>
             </TouchableOpacity>
@@ -225,112 +287,136 @@ export default function Profile() {
         </View>
       </Modal>
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#020617',
+    backgroundColor: "#020617",
     padding: 20,
   },
+
   title: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 28,
     marginBottom: 20,
-    fontWeight: '700',
+    fontWeight: "700",
   },
+
   card: {
-    backgroundColor: '#111827',
+    backgroundColor: "#111827",
     padding: 16,
     borderRadius: 16,
     marginBottom: 20,
   },
+
   label: {
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginTop: 10,
     fontSize: 12,
   },
+
   value: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
     marginTop: 2,
   },
+
   button: {
-    backgroundColor: '#22c55e',
+    backgroundColor: "#22c55e",
     padding: 15,
     borderRadius: 12,
     marginBottom: 10,
   },
+
   adminButton: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: "#3b82f6",
     padding: 15,
     borderRadius: 12,
     marginBottom: 10,
   },
+
   logoutButton: {
-    backgroundColor: '#ef4444',
+    backgroundColor: "#ef4444",
     padding: 15,
     borderRadius: 12,
   },
+
   buttonText: {
-    textAlign: 'center',
-    fontWeight: '700',
-    color: '#000',
+    textAlign: "center",
+    fontWeight: "700",
+    color: "#000",
   },
+
   adminButtonText: {
-    textAlign: 'center',
-    fontWeight: '700',
-    color: '#fff',
+    textAlign: "center",
+    fontWeight: "700",
+    color: "#fff",
   },
+
   logoutButtonText: {
-    textAlign: 'center',
-    fontWeight: '700',
-    color: '#fff',
+    textAlign: "center",
+    fontWeight: "700",
+    color: "#fff",
   },
+
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
     padding: 20,
   },
+
   modal: {
-    backgroundColor: '#020617',
+    backgroundColor: "#020617",
     padding: 20,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: "#1e293b",
   },
+
   modalTitle: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 20,
     marginBottom: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
+
   input: {
-    backgroundColor: '#111827',
-    color: '#fff',
+    backgroundColor: "#111827",
+    color: "#fff",
     padding: 12,
     borderRadius: 10,
-    marginBottom: 10,
+    marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: "#334155",
   },
+
+  counter: {
+    color: "#9ca3af",
+    fontSize: 12,
+    textAlign: "right",
+    marginBottom: 10,
+  },
+
   saveButton: {
-    backgroundColor: '#22c55e',
+    backgroundColor: "#22c55e",
     padding: 14,
     borderRadius: 12,
     marginTop: 10,
   },
+
   cancelButton: {
-    backgroundColor: '#374151',
+    backgroundColor: "#374151",
     padding: 14,
     borderRadius: 12,
     marginTop: 10,
   },
+
   cancelButtonText: {
-    textAlign: 'center',
-    fontWeight: '700',
-    color: '#fff',
+    textAlign: "center",
+    fontWeight: "700",
+    color: "#fff",
   },
-})
+});

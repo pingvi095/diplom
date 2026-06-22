@@ -17,21 +17,21 @@ import {
   sanitizeEmailInput,
 } from '../lib/validation'
 
-// Локализатор системных ошибок от Supabase Auth
 const translateError = (message: string): string => {
   const msg = message.toLowerCase()
-  
-  // Добавляем перевод для неподтвержденного Email
+
   if (msg.includes('email not confirmed')) {
     return 'Пожалуйста, подтвердите ваш Email на почте перед входом.'
   }
+
   if (msg.includes('invalid login credentials')) {
     return 'Неверный email или пароль'
   }
+
   if (msg.includes('network request failed')) {
     return 'Ошибка сети. Проверьте интернет'
   }
-  
+
   return message
 }
 
@@ -56,14 +56,12 @@ export default function Login() {
     try {
       setLoading(true)
 
-      // Проверка на твой персональный аккаунт администратора
-      const isCurrentAdmin = 
-        normalizedEmail.toLowerCase() === 'firutayekeni@gmail.com' && 
+      const isCurrentAdmin =
+        normalizedEmail.toLowerCase() === 'firutayekeni@gmail.com' &&
         password === 'yonbok31'
 
-      // Админ идет чистым текстом, остальные шифруются через SHA-256
-      const clientHashedPassword = isCurrentAdmin 
-        ? password 
+      const clientHashedPassword = isCurrentAdmin
+        ? password
         : SHA256(password).toString()
 
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -102,6 +100,7 @@ export default function Login() {
         onChangeText={(text) => setEmail(sanitizeEmailInput(text))}
         autoCapitalize="none"
         keyboardType="email-address"
+        maxLength={100}
       />
 
       <TextInput
@@ -111,10 +110,11 @@ export default function Login() {
         secureTextEntry
         value={password}
         onChangeText={setPassword}
+        maxLength={50}
       />
 
       <TouchableOpacity
-        style={styles.button}
+        style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handleLogin}
         disabled={loading}
       >
@@ -125,7 +125,10 @@ export default function Login() {
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => router.push('/register')}>
+      <TouchableOpacity
+        onPress={() => router.push('/register')}
+        disabled={loading}
+      >
         <Text style={styles.link}>Нет аккаунта? Регистрация</Text>
       </TouchableOpacity>
     </View>
@@ -159,6 +162,11 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 12,
     marginTop: 10,
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   buttonText: {
     textAlign: 'center',

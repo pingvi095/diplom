@@ -12,7 +12,6 @@ import {
 import { supabase } from '../lib/supabase'
 import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
-// Импортируем нашу функцию автоматических уведомлений
 import { sendLocalNotification } from '../lib/NotificationService'
 
 type ProfileRow = {
@@ -36,8 +35,7 @@ export default function Admin() {
   const [events, setEvents] = useState<any[]>([])
   const [requests, setRequests] = useState<RoleRequest[]>([])
   const [search, setSearch] = useState('')
-  
-  // Стейты для управления сворачиванием секций (аккордеонов)
+
   const [requestsExpanded, setRequestsExpanded] = useState(false)
   const [usersExpanded, setUsersExpanded] = useState(false)
   const [eventsExpanded, setEventsExpanded] = useState(false)
@@ -92,17 +90,16 @@ export default function Admin() {
     const fetchedRequests = (data || []) as RoleRequest[]
     setRequests(fetchedRequests)
 
-    // АВТОМАТИЧЕСКАЯ ПРОВЕРКА ДЛЯ УВЕДОМЛЕНИЙ
-    // Считаем заявки со статусом 'pending'
-    const pendingCount = fetchedRequests.filter((r) => r.status === 'pending').length
-    
+    const pendingCount = fetchedRequests.filter(
+      (request) => request.status === 'pending'
+    ).length
+
     if (pendingCount > 0) {
-      // Сама магия автоматического уведомления при входе админа!
       await sendLocalNotification(
-        "📢 Новая заявка на роль",
-        `Внимание! В системе обнаружено ${pendingCount} новых запросов на статус Организатора.`
+        '📢 Новая заявка на роль',
+        `В системе обнаружено ${pendingCount} новых запросов на статус организатора.`
       )
-      // Для красоты автоматически приоткрываем вкладку с заявками на экране
+
       setRequestsExpanded(true)
     }
   }
@@ -118,11 +115,14 @@ export default function Admin() {
       return
     }
 
-    loadUsers()
+    await loadUsers()
     Alert.alert('Успех', 'Роль пользователя успешно изменена')
   }
 
-  const handleRequest = async (request: RoleRequest, status: 'approved' | 'declined') => {
+  const handleRequest = async (
+    request: RoleRequest,
+    status: 'approved' | 'declined'
+  ) => {
     const { error: requestError } = await supabase
       .from('role_requests')
       .update({ status })
@@ -145,21 +145,34 @@ export default function Admin() {
       }
     }
 
-    loadRequests()
-    loadUsers()
-    Alert.alert('Готово', status === 'approved' ? 'Заявка одобрена' : 'Заявка отклонена')
+    await loadRequests()
+    await loadUsers()
+
+    Alert.alert(
+      'Готово',
+      status === 'approved' ? 'Заявка одобрена' : 'Заявка отклонена'
+    )
   }
 
   const deleteEvent = async (id: string) => {
-    const { error } = await supabase.from('events').delete().eq('id', id)
+    Alert.alert('Удаление', 'Удалить мероприятие?', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Удалить',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('events').delete().eq('id', id)
 
-    if (error) {
-      Alert.alert('Ошибка', error.message)
-      return
-    }
+          if (error) {
+            Alert.alert('Ошибка', error.message)
+            return
+          }
 
-    loadEvents()
-    Alert.alert('Готово', 'Мероприятие удалено')
+          await loadEvents()
+          Alert.alert('Готово', 'Мероприятие удалено')
+        },
+      },
+    ])
   }
 
   const deleteProfile = async (profile: ProfileRow) => {
@@ -180,11 +193,30 @@ export default function Admin() {
                   .eq('recipient_email', profile.email)
               }
 
-              await supabase.from('invitations').delete().eq('sender_id', profile.id)
-              await supabase.from('favorites').delete().eq('user_id', profile.id)
-              await supabase.from('tickets').delete().eq('user_id', profile.id)
-              await supabase.from('events').delete().eq('user_id', profile.id)
-              await supabase.from('role_requests').delete().eq('user_id', profile.id)
+              await supabase
+                .from('invitations')
+                .delete()
+                .eq('sender_id', profile.id)
+
+              await supabase
+                .from('favorites')
+                .delete()
+                .eq('user_id', profile.id)
+
+              await supabase
+                .from('tickets')
+                .delete()
+                .eq('user_id', profile.id)
+
+              await supabase
+                .from('events')
+                .delete()
+                .eq('user_id', profile.id)
+
+              await supabase
+                .from('role_requests')
+                .delete()
+                .eq('user_id', profile.id)
 
               const { error: profileError } = await supabase
                 .from('profiles')
@@ -196,12 +228,16 @@ export default function Admin() {
                 return
               }
 
-              loadUsers()
-              loadEvents()
-              loadRequests()
+              await loadUsers()
+              await loadEvents()
+              await loadRequests()
+
               Alert.alert('Готово', 'Профиль удалён')
-            } catch (e: any) {
-              Alert.alert('Ошибка', e.message || 'Не удалось удалить профиль')
+            } catch (error: any) {
+              Alert.alert(
+                'Ошибка',
+                error.message || 'Не удалось удалить профиль'
+              )
             }
           },
         },
@@ -209,7 +245,6 @@ export default function Admin() {
     )
   }
 
-  // Перевод ролей на русский язык для отображения
   const translateRole = (role: string) => {
     switch (role) {
       case 'admin':
@@ -223,7 +258,6 @@ export default function Admin() {
     }
   }
 
-  // Перевод статусов на русский язык для отображения
   const translateStatus = (status: string) => {
     switch (status) {
       case 'pending':
@@ -238,51 +272,59 @@ export default function Admin() {
   }
 
   const filteredUsers = users.filter((user) => {
-    const q = search.trim().toLowerCase()
-    if (!q) return true
+    const query = search.trim().toLowerCase()
+
+    if (!query) return true
 
     return (
-      String(user.email || '').toLowerCase().includes(q) ||
-      String(user.full_name || '').toLowerCase().includes(q) ||
-      String(user.phone || '').toLowerCase().includes(q) ||
-      translateRole(user.role).toLowerCase().includes(q)
+      String(user.email || '').toLowerCase().includes(query) ||
+      String(user.full_name || '').toLowerCase().includes(query) ||
+      String(user.phone || '').toLowerCase().includes(query) ||
+      translateRole(user.role).toLowerCase().includes(query)
     )
   })
 
-  // Подсчет количества активных заявок "в ожидании" для вывода на бейдж
-  const pendingRequestsCount = requests.filter((r) => r.status === 'pending').length
+  const pendingRequestsCount = requests.filter(
+    (request) => request.status === 'pending'
+  ).length
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* ЗАКРЕПЛЕННЫЙ ВЕРХНИЙ ХЕДЕР */}
       <View style={styles.fixedHeader}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
           <Ionicons name="chevron-back" size={20} color="#fff" />
           <Text style={styles.backButtonText}>Назад</Text>
         </TouchableOpacity>
+
         <Text style={styles.headerTitle}>Админ панель</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
-        {/* СЕКЦИЯ 1: ЗАЯВКИ НА РОЛЬ ОРГАНИЗАТОРА */}
-        <TouchableOpacity 
-          style={styles.accordionHeader} 
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <TouchableOpacity
+          style={styles.accordionHeader}
           onPress={() => setRequestsExpanded(!requestsExpanded)}
           activeOpacity={0.7}
         >
           <View style={styles.accordionTitleRow}>
             <Text style={styles.sectionTitle}>Заявки на организатора</Text>
+
             {pendingRequestsCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{pendingRequestsCount}</Text>
               </View>
             )}
           </View>
-          <Ionicons 
-            name={requestsExpanded ? 'chevron-up' : 'chevron-down'} 
-            size={22} 
-            color="#22c55e" 
+
+          <Ionicons
+            name={requestsExpanded ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color="#22c55e"
           />
         </TouchableOpacity>
 
@@ -291,25 +333,30 @@ export default function Admin() {
             {requests.length === 0 ? (
               <Text style={styles.emptyText}>Пока нет заявок</Text>
             ) : (
-              requests.map((req) => (
-                <View key={req.id} style={styles.card}>
-                  <Text style={styles.text}>ID Пользователя: {req.user_id}</Text>
-                  <Text style={styles.subText}>Статус: {translateStatus(req.status)}</Text>
+              requests.map((request) => (
+                <View key={request.id} style={styles.card}>
+                  <Text style={styles.text}>
+                    ID пользователя: {request.user_id}
+                  </Text>
 
-                  {req.status === 'pending' && (
+                  <Text style={styles.subText}>
+                    Статус: {translateStatus(request.status)}
+                  </Text>
+
+                  {request.status === 'pending' && (
                     <View style={styles.row}>
                       <TouchableOpacity
                         style={styles.button}
-                        onPress={() => handleRequest(req, 'approved')}
+                        onPress={() => handleRequest(request, 'approved')}
                       >
                         <Text style={styles.btnText}>Принять</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => handleRequest(req, 'declined')}
+                        style={styles.deleteButtonSmall}
+                        onPress={() => handleRequest(request, 'declined')}
                       >
-                        <Text style={styles.btnText}>Отклонить</Text>
+                        <Text style={styles.deleteBtnText}>Отклонить</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -319,17 +366,17 @@ export default function Admin() {
           </View>
         )}
 
-        {/* СЕКЦИЯ 2: ПОЛЬЗОВАТЕЛИ */}
-        <TouchableOpacity 
-          style={styles.accordionHeader} 
+        <TouchableOpacity
+          style={styles.accordionHeader}
           onPress={() => setUsersExpanded(!usersExpanded)}
           activeOpacity={0.7}
         >
           <Text style={styles.sectionTitle}>Пользователи</Text>
-          <Ionicons 
-            name={usersExpanded ? 'chevron-up' : 'chevron-down'} 
-            size={22} 
-            color="#22c55e" 
+
+          <Ionicons
+            name={usersExpanded ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color="#22c55e"
           />
         </TouchableOpacity>
 
@@ -337,7 +384,7 @@ export default function Admin() {
           <View style={styles.accordionBody}>
             <TextInput
               style={styles.search}
-              placeholder="Поиск пользователя по имени, почте или роли..."
+              placeholder="Поиск по имени, почте или роли..."
               placeholderTextColor="#888"
               value={search}
               onChangeText={setSearch}
@@ -348,11 +395,28 @@ export default function Admin() {
             ) : (
               filteredUsers.map((user) => (
                 <View key={user.id} style={styles.card}>
-                  <Text style={styles.text}>{user.full_name || 'Без имени'}</Text>
-                  <Text style={styles.subText}>{user.email || 'Без email'}</Text>
-                  <Text style={styles.subText}>Телефон: {user.phone || 'не указан'}</Text>
-                  <Text style={styles.role}>Роль: <Text style={styles.roleHighlight}>{translateRole(user.role)}</Text></Text>
-                  <Text style={styles.subText}>Возраст: {user.age ?? 'не указан'}</Text>
+                  <Text style={styles.text}>
+                    {user.full_name || 'Без имени'}
+                  </Text>
+
+                  <Text style={styles.subText}>
+                    {user.email || 'Без email'}
+                  </Text>
+
+                  <Text style={styles.subText}>
+                    Телефон: {user.phone || 'не указан'}
+                  </Text>
+
+                  <Text style={styles.role}>
+                    Роль:{' '}
+                    <Text style={styles.roleHighlight}>
+                      {translateRole(user.role)}
+                    </Text>
+                  </Text>
+
+                  <Text style={styles.subText}>
+                    Возраст: {user.age ?? 'не указан'}
+                  </Text>
 
                   <View style={styles.roleChangeRow}>
                     <TouchableOpacity
@@ -381,7 +445,7 @@ export default function Admin() {
                     style={styles.deleteButton}
                     onPress={() => deleteProfile(user)}
                   >
-                    <Text style={styles.btnText}>Удалить профиль</Text>
+                    <Text style={styles.deleteBtnText}>Удалить профиль</Text>
                   </TouchableOpacity>
                 </View>
               ))
@@ -389,17 +453,17 @@ export default function Admin() {
           </View>
         )}
 
-        {/* СЕКЦИЯ 3: СОБЫТИЯ */}
-        <TouchableOpacity 
-          style={styles.accordionHeader} 
+        <TouchableOpacity
+          style={styles.accordionHeader}
           onPress={() => setEventsExpanded(!eventsExpanded)}
           activeOpacity={0.7}
         >
           <Text style={styles.sectionTitle}>События</Text>
-          <Ionicons 
-            name={eventsExpanded ? 'chevron-up' : 'chevron-down'} 
-            size={22} 
-            color="#22c55e" 
+
+          <Ionicons
+            name={eventsExpanded ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color="#22c55e"
           />
         </TouchableOpacity>
 
@@ -410,22 +474,29 @@ export default function Admin() {
             ) : (
               events.map((event) => (
                 <View key={event.id} style={styles.card}>
-                  <Text style={styles.text}>{event.title}</Text>
-                  <Text style={styles.subText}>Дата: {event.date}</Text>
-                  <Text style={styles.subText}>Место: {event.location || 'Не указано'}</Text>
+                  <Text style={styles.text}>
+                    {event.title || 'Без названия'}
+                  </Text>
+
+                  <Text style={styles.subText}>
+                    Дата: {event.date || 'не указана'}
+                  </Text>
+
+                  <Text style={styles.subText}>
+                    Место: {event.location || 'Не указано'}
+                  </Text>
 
                   <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => deleteEvent(event.id)}
                   >
-                    <Text style={styles.btnText}>Удалить событие</Text>
+                    <Text style={styles.deleteBtnText}>Удалить событие</Text>
                   </TouchableOpacity>
                 </View>
               ))
             )}
           </View>
         )}
-
       </ScrollView>
     </SafeAreaView>
   )
@@ -436,39 +507,48 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#020617',
   },
+
   fixedHeader: {
-    flexDirection: 'row',
+    height: 72,
+    justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#0f172a',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
+    position: 'relative',
   },
+
   backButton: {
+    position: 'absolute',
+    left: 16,
+    top: 17,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#334155',
-    paddingVertical: 6,
+    paddingVertical: 8,
     paddingHorizontal: 10,
-    borderRadius: 8,
+    borderRadius: 10,
   },
+
   backButtonText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
     marginLeft: 2,
   },
+
   headerTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: '700',
-    marginLeft: 16,
+    textAlign: 'center',
   },
+
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
   },
+
   accordionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -478,11 +558,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 12,
   },
+
   accordionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+
   accordionBody: {
     backgroundColor: '#0f172a',
     padding: 10,
@@ -492,11 +574,13 @@ const styles = StyleSheet.create({
     borderColor: '#1e293b',
     borderTopWidth: 0,
   },
+
   sectionTitle: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
   },
+
   badge: {
     backgroundColor: '#ef4444',
     borderRadius: 99,
@@ -505,11 +589,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+
   badgeText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: '700',
   },
+
   search: {
     backgroundColor: '#111827',
     color: '#fff',
@@ -520,11 +606,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
   },
+
   emptyText: {
     color: '#9ca3af',
     padding: 10,
     textAlign: 'center',
   },
+
   card: {
     backgroundColor: '#111827',
     padding: 14,
@@ -533,31 +621,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1e293b',
   },
+
   text: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
   },
+
   subText: {
     color: '#cbd5e1',
     marginTop: 4,
     fontSize: 13,
   },
+
   role: {
     color: '#9ca3af',
     marginTop: 6,
     marginBottom: 8,
     fontSize: 13,
   },
+
   roleHighlight: {
     color: '#22c55e',
     fontWeight: '700',
   },
+
   row: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 10,
   },
+
   roleChangeRow: {
     flexDirection: 'row',
     gap: 6,
@@ -566,12 +660,15 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 8,
   },
+
   button: {
+    flex: 1,
     backgroundColor: '#22c55e',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 8,
+    alignItems: 'center',
   },
+
   roleButton: {
     backgroundColor: '#334155',
     paddingVertical: 6,
@@ -580,19 +677,36 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
+
   deleteButton: {
     backgroundColor: '#ef4444',
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
     marginTop: 10,
     alignItems: 'center',
   },
+
+  deleteButtonSmall: {
+    flex: 1,
+    backgroundColor: '#ef4444',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+
   btnText: {
     color: '#000',
     fontWeight: '700',
     fontSize: 14,
   },
+
+  deleteBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+
   roleBtnText: {
     color: '#fff',
     fontWeight: '600',

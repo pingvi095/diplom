@@ -17,6 +17,18 @@ import { formatIsoDateForDisplay } from '../../lib/validation'
 const DEFAULT_IMAGE =
   'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
 
+const isEventFinished = (endDate: string | null | undefined) => {
+  if (!endDate) return false
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const eventEndDate = new Date(`${endDate}T00:00:00`)
+  eventEndDate.setHours(0, 0, 0, 0)
+
+  return today > eventEndDate
+}
+
 export default function MyEvents() {
   const [events, setEvents] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -90,39 +102,64 @@ export default function MyEvents() {
           data={events}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={{ paddingBottom: 40 }}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Image
-                source={{ uri: item.image_url || DEFAULT_IMAGE }}
-                style={styles.image}
-              />
+          renderItem={({ item }) => {
+            const finished = isEventFinished(item.end_date)
 
-              <View style={styles.content}>
-                <Text style={styles.title}>{item.title || 'Без названия'}</Text>
-                <Text style={styles.text}>📅 {formatIsoDateForDisplay(item.date)}</Text>
-                <Text style={styles.text}>📍 {item.location || 'Место не указано'}</Text>
+            return (
+              <View style={[styles.card, finished && styles.finishedCard]}>
+                <Image
+                  source={{ uri: item.image_url || DEFAULT_IMAGE }}
+                  style={styles.image}
+                />
 
-                <TouchableOpacity
-                  style={styles.editButton}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/edit-event',
-                      params: { id: item.id },
-                    })
-                  }
-                >
-                  <Text style={styles.btnText}>Редактировать</Text>
-                </TouchableOpacity>
+                <View style={styles.content}>
+                  <Text style={styles.title}>
+                    {item.title || 'Без названия'}
+                  </Text>
 
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => deleteEvent(item.id)}
-                >
-                  <Text style={styles.btnText}>Удалить</Text>
-                </TouchableOpacity>
+                  <Text style={styles.text}>
+                    📅 Начало: {formatIsoDateForDisplay(item.date)}
+                  </Text>
+
+                  <Text style={styles.text}>
+                    🏁 Окончание:{' '}
+                    {item.end_date
+                      ? formatIsoDateForDisplay(item.end_date)
+                      : 'Не указано'}
+                  </Text>
+
+                  <Text style={styles.text}>
+                    📍 {item.location || 'Место не указано'}
+                  </Text>
+
+                  {finished ? (
+                    <Text style={styles.finishedText}>Статус: Завершено</Text>
+                  ) : (
+                    <Text style={styles.activeText}>Статус: Активно</Text>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/edit-event',
+                        params: { id: item.id },
+                      })
+                    }
+                  >
+                    <Text style={styles.btnText}>Редактировать</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => deleteEvent(item.id)}
+                  >
+                    <Text style={styles.deleteBtnText}>Удалить</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          )}
+            )
+          }}
           ListEmptyComponent={
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>У тебя пока нет событий</Text>
@@ -161,6 +198,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     overflow: 'hidden',
   },
+  finishedCard: {
+    opacity: 0.75,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
   image: {
     width: '100%',
     height: 150,
@@ -177,6 +219,16 @@ const styles = StyleSheet.create({
     color: '#cbd5e1',
     marginTop: 5,
   },
+  activeText: {
+    color: '#22c55e',
+    marginTop: 10,
+    fontWeight: '700',
+  },
+  finishedText: {
+    color: '#ef4444',
+    marginTop: 10,
+    fontWeight: '700',
+  },
   editButton: {
     backgroundColor: '#22c55e',
     padding: 12,
@@ -191,6 +243,11 @@ const styles = StyleSheet.create({
   },
   btnText: {
     color: '#000',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  deleteBtnText: {
+    color: '#fff',
     fontWeight: '700',
     textAlign: 'center',
   },
